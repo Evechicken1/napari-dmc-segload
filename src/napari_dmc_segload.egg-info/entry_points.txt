@@ -1,2 +1,0 @@
-[napari.manifest]
-napari-dmc-segload = napari_dmc_segload:napari.yaml
