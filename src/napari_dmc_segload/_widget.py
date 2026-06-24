@@ -98,9 +98,13 @@ class SegLoaderWidget(QWidget):
         input_path = self._input_path()
         if input_path is None:
             return
-        chans = ChannelScanner(input_path).available_channels()
+        scanner = ChannelScanner(input_path)
+        chans = scanner.available_channels()
         if not chans:
             show_info("No channels with images found under single_channel/.")
+        elif not scanner.params_found:
+            show_info("params.json missing/invalid; listing channels from "
+                      "single_channel/ folders only.")
         self.form.reference_channels.choices = chans
         self.form.segmentation_channels.choices = chans
 

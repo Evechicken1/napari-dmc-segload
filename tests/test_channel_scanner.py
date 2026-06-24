@@ -19,5 +19,15 @@ def test_params_missing_falls_back_to_folder_scan(animal_dir):
     assert chans == ["dapi", "cy3"]
 
 
+def test_params_found_flag_reflects_params_presence(animal_dir):
+    scanner = ChannelScanner(animal_dir)
+    scanner.available_channels()
+    assert scanner.params_found is True
+    (animal_dir / "params.json").unlink()
+    scanner_no_params = ChannelScanner(animal_dir)
+    scanner_no_params.available_channels()
+    assert scanner_no_params.params_found is False
+
+
 def test_no_single_channel_dir_returns_empty(tmp_path):
     assert ChannelScanner(tmp_path).available_channels() == []

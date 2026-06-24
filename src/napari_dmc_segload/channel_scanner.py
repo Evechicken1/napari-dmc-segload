@@ -10,6 +10,9 @@ class ChannelScanner:
 
     def __init__(self, input_path: Path):
         self.input_path = Path(input_path)
+        # Set by available_channels(): False when params.json was missing/invalid
+        # and the result fell back to a folder-only scan.
+        self.params_found = False
 
     def _folders_with_tifs(self) -> List[str]:
         sc_dir = self.input_path / "single_channel"
@@ -34,6 +37,7 @@ class ChannelScanner:
     def available_channels(self) -> List[str]:
         folders = set(self._folders_with_tifs())
         imaged = self._imaged_channels()
+        self.params_found = imaged is not None
         if imaged is not None:
             folders &= set(imaged)
         return [c for c in CANONICAL_CHANNELS if c in folders]

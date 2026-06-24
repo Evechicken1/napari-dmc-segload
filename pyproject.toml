@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "napari-dmc-segload"
 version = "0.1.0"
 description = "Channel-aware segmentation image loader for DMC-BrainMap"
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "napari",
