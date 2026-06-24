@@ -1,0 +1,10 @@
+napari
+numpy
+pandas
+natsort
+magicgui
+qtpy
+
+[testing]
+pytest
+pytest-qt

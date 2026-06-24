@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: napari-dmc-segload
+Version: 0.1.0
+Summary: Channel-aware segmentation image loader for DMC-BrainMap
+Requires-Python: >=3.9
+Requires-Dist: napari
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: natsort
+Requires-Dist: magicgui
+Requires-Dist: qtpy
+Provides-Extra: testing
+Requires-Dist: pytest; extra == "testing"
+Requires-Dist: pytest-qt; extra == "testing"

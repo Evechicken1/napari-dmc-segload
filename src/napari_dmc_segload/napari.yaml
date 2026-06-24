@@ -1,0 +1,10 @@
+name: napari-dmc-segload
+display_name: DMC Segmentation Loader
+contributions:
+  commands:
+    - id: napari-dmc-segload.SegLoaderWidget
+      python_name: napari_dmc_segload._widget:SegLoaderWidget
+      title: Open Segmentation Loader
+  widgets:
+    - command: napari-dmc-segload.SegLoaderWidget
+      display_name: Segmentation loader
