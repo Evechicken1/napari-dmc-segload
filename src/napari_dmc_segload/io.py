@@ -38,15 +38,15 @@ def _seg_dir(input_path: Path, seg_type: str, chan: str) -> Path:
     return d
 
 
-def _save_name(seg_dir: Path, image_stem: str, seg_type: str) -> Path:
-    return seg_dir / f"{image_stem}_{seg_type}.csv"
+def _save_name(seg_dir: Path, stem: str, seg_type: str) -> Path:
+    return seg_dir / f"{stem}_{seg_type}.csv"
 
 
-def save_points_layer(data, input_path: Path, seg_type: str, chan: str, image_stem: str):
+def save_points_layer(data, input_path: Path, seg_type: str, chan: str, stem: str):
     """Write a points layer to dmc's CSV format. Empty data removes a stale file
     and returns None; otherwise returns the written path."""
     seg_dir = _seg_dir(input_path, seg_type, chan)
-    save_name = _save_name(seg_dir, image_stem, seg_type)
+    save_name = _save_name(seg_dir, stem, seg_type)
     arr = np.asarray(data)
     if len(arr) == 0:
         if save_name.exists():
@@ -57,10 +57,10 @@ def save_points_layer(data, input_path: Path, seg_type: str, chan: str, image_st
     return save_name
 
 
-def save_shapes_layer(shapes, input_path: Path, seg_type: str, chan: str, image_stem: str):
+def save_shapes_layer(shapes, input_path: Path, seg_type: str, chan: str, stem: str):
     """Write a shapes (polygon) layer to dmc's CSV format with idx_shape."""
     seg_dir = _seg_dir(input_path, seg_type, chan)
-    save_name = _save_name(seg_dir, image_stem, seg_type)
+    save_name = _save_name(seg_dir, stem, seg_type)
     if len(shapes) == 0:
         if save_name.exists():
             save_name.unlink()
