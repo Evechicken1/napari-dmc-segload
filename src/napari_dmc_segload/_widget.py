@@ -153,11 +153,11 @@ class SegLoaderWidget(QWidget):
             return
         seg_type = self.form.seg_type.value
         idx = int(self.form.image_idx.value)
-        ref_for_stem = (seg + ref)
-        if not ref_for_stem:
-            show_info("No channels selected.")
+        try:
+            stem = image_stem(input_path, (seg + ref)[0], idx)
+        except IndexError as e:
+            show_info(str(e))
             return
-        stem = image_stem(input_path, ref_for_stem[0], idx)
 
         if seg_type in PROBE_SEG_TYPES:
             ids = [f"{seg_type}_{i}" for i in range(int(self.form.n_probes.value))]

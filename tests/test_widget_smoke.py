@@ -59,3 +59,15 @@ def test_save_writes_csv_for_traced_points(make_napari_viewer, animal_dir):
     w._save_segmentation()
     out = animal_dir / "segmentation" / "cells" / "cy3" / "animal01_obj1_1_stitched_cells.csv"
     assert out.exists()
+
+
+def test_save_out_of_range_index_aborts_cleanly(make_napari_viewer, animal_dir):
+    viewer = make_napari_viewer()
+    w = SegLoaderWidget(viewer)
+    _configure(w, animal_dir, ref=["dapi"], seg=["cy3"], seg_type="cells")
+    w._load_into_viewer()
+    w.form.image_idx.value = 99  # past the 3 images in the fixture
+    w._save_segmentation()  # must not raise
+    out_dir = animal_dir / "segmentation" / "cells" / "cy3"
+    # no file written for the out-of-range index
+    assert not any(out_dir.glob("*99*")) if out_dir.exists() else True
