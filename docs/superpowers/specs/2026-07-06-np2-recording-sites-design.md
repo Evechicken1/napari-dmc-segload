@@ -203,5 +203,8 @@ bottom group: segmentation → reference → NP2.0 track/site layers.
 - Column offset assumes the traced endpoints correspond to the template's z_min
   (tip) and z_max electrodes; if they don't, absolute offsets shift slightly, but
   region-per-depth is unaffected and the two columns are only 32 µm apart.
-- Assumes the traced polyline order is deepest → shallowest; row orientation
-  depends on it. Documented in the widget tooltip.
+- Tracing direction is auto-resolved: the endpoint lower in the image (larger
+  Position Y) is taken as the tip (deepest electrode), so it does not matter
+  whether the user traces tip→top or top→tip. Trade-off: this assumes the tip
+  sits at the larger-Y end of the track; for an unusually oriented probe/slice
+  the tip/top (and thus the left/right column) could be flipped.

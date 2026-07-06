@@ -7,11 +7,13 @@ def place_electrodes_on_track(track_vertices, z_um, x_um):
     Parameters
     ----------
     track_vertices : (N>=2, 2) array of (Position Y, Position X) polyline
-        vertices in image pixels, ordered deepest -> shallowest (z ascending).
+        vertices in image pixels. Trace direction does not matter: the endpoint
+        lower in the image (larger Position Y) is taken as the shank tip
+        (deepest electrode, z_min), and the vertices are oriented accordingly.
     z_um, x_um : parallel per-electrode on-shank coordinates (micrometres).
 
-    The two polyline endpoints correspond to the electrodes at min(z_um) and
-    max(z_um). Each electrode is placed at arc-length fraction
+    The tip/top polyline endpoints correspond to the electrodes at min(z_um)
+    and max(z_um). Each electrode is placed at arc-length fraction
     (z - z_min) / (z_max - z_min). Columns are offset by (x - x_centre), scaled
     by the pixels-per-micron implied by the depth span, along the local
     perpendicular to the track.
@@ -24,6 +26,13 @@ def place_electrodes_on_track(track_vertices, z_um, x_um):
     verts = np.asarray(track_vertices, dtype=float)
     if verts.ndim != 2 or verts.shape[1] != 2 or verts.shape[0] < 2:
         raise ValueError("track_vertices must be an (N>=2, 2) array")
+
+    # Auto-orient by depth: the traced endpoint lower in the image (larger
+    # Position Y, column 0) is the tip (deepest electrode). Flip the vertex
+    # order if needed so the tip endpoint comes first, making the result
+    # independent of the direction the shank was traced.
+    if verts[0, 0] < verts[-1, 0]:
+        verts = verts[::-1]
 
     z = np.asarray(z_um, dtype=float)
     x = np.asarray(x_um, dtype=float)
