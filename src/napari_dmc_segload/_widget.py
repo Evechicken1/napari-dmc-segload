@@ -131,6 +131,22 @@ class SegLoaderWidget(QWidget):
             for chan in seg_channels:
                 self.viewer.add_points(name=chan, size=point_size)
 
+    def _reorder_layers(self, ref, seg, seg_type, n_probes):
+        """Enforce a fixed top→bottom layer order in the layer list:
+        segmentation image(s), reference image(s), then probe/tracing layers."""
+        top_to_bottom = [f"{chan} channel" for chan in seg]
+        top_to_bottom += [f"{chan} channel" for chan in ref]
+        if seg_type in PROBE_SEG_TYPES:
+            top_to_bottom += [f"{seg_type}_{i}" for i in range(n_probes)]
+        else:  # point/shape tracing layers share the channel name
+            top_to_bottom += list(seg)
+        # add_* appends to the top of the list; moving each layer to the top
+        # from the bottom of the desired order upward leaves reference on top.
+        layers = self.viewer.layers
+        for name in reversed(top_to_bottom):
+            if name in layers:
+                layers.move(layers.index(layers[name]), len(layers))
+
     def _load_into_viewer(self):
         input_path = self._input_path()
         if input_path is None:
@@ -140,13 +156,14 @@ class SegLoaderWidget(QWidget):
             return
         idx = int(self.form.image_idx.value)
         point_size = int(self.form.point_size.value)
+        seg_type = self.form.seg_type.value
+        n_probes = int(self.form.n_probes.value)
         for chan in ref:
             self._add_image_layer(input_path, chan, idx, REFERENCE_OPACITY)
         for chan in seg:
             self._add_image_layer(input_path, chan, idx, SEGMENTATION_OPACITY)
-        self._add_tracing_layers(
-            self.form.seg_type.value, seg, int(self.form.n_probes.value), point_size
-        )
+        self._add_tracing_layers(seg_type, seg, n_probes, point_size)
+        self._reorder_layers(ref, seg, seg_type, n_probes)
 
     def _save_segmentation(self):
         input_path = self._input_path()
