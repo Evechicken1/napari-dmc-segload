@@ -1,171 +1,207 @@
 # napari-dmc-segload — Neuropixels 2.0 recording-site reconstruction
 
 **Date:** 2026-07-06
-**Status:** Design pending spec review
+**Status:** Design pending spec review (revised for metadata-baked electrode template)
 
 ## Problem
 
-The plugin's `neuropixels_probe` segmentation type lets the user trace a coarse
-probe track as a few points, but it cannot reconstruct the location of the
-**individual recording sites** along a Neuropixels 2.0 4-shank probe. For
-channel-to-region assignment we want, per shank, the position of each electrode
-row (and column) in the histology image, derived from the traced track and the
-known NP2.0 site geometry.
+The plugin's `neuropixels_probe` segmentation type traces a coarse probe track as
+a few points, but it cannot reconstruct the location of the **individual
+electrodes** of a Neuropixels 2.0 4-shank probe in the histology. We want, per
+shank, the histology position of each electrode row/column, derived from the
+traced track and the **standard NP2.0 electrode geometry**.
+
+## Scope boundary (important)
+
+There are two distinct mappings:
+
+1. **electrode index → physical location** — *standard* NP2.0 geometry, the same
+   for every session. This is what the plugin reconstructs, using a **baked
+   template** (no runtime metadata needed).
+2. **recording channel → electrode** — *session-specific*; the SpikeGLX
+   channelmap/imro can change between recordings. The plugin does **NOT** do
+   this. There is no recording-channel column in the output.
+
+Downstream analysis joins recording channel → electrode (via each session's
+`.meta`) → the histology coordinates this plugin produces. Keeping the
+session-specific channelmap out of the plugin is deliberate.
 
 ## Goal
 
-Add a segmentation type that:
+Add a `neuropixels_2.0` segmentation type that:
 
 - Presents four shank **track** layers to trace (one NP2.0 4-shank probe).
-- Auto-generates the recording-site coordinates by distributing them along each
-  traced track, reproducing NP2.0's two-column electrode grid.
-- Lets the user *see* the generated sites before saving.
-- Saves one CSV per shank in the existing dmc segmentation folder layout.
+- Auto-generates every template electrode's histology coordinate along each
+  traced track, reproducing NP2.0's two-column grid at the electrodes' true
+  on-shank `(x, z)`.
+- Lets the user *see* the generated electrodes before saving.
+- Saves one CSV per shank carrying electrode-geometry identity.
 
 ## Non-goals
 
-- No channel-map / SpikeGLX `.meta` parsing; site counts come from widget
-  geometry parameters.
-- No µm/pixel scaling or absolute-depth placement; sites are normalised to the
-  traced endpoints (robust to tissue shrinkage).
-- No support (yet) for single-shank NP2.0 or multiple probes; exactly one
-  4-shank probe. (`n_shanks` is a parameter, so other counts work, but 4 is the
-  designed-for case.)
+- No recording-channel ↔ electrode mapping; no runtime `.meta` parsing.
+- No support for single-shank NP2.0 or multiple probes; exactly one 4-shank
+  probe (`n_shanks` parameter defaults to 4).
+- No µm/pixel absolute scaling; electrode depths are normalised between the
+  template's deepest and shallowest electrode along the traced track.
 
 ## Key decisions (from brainstorming)
 
-- **Auto-generate** sites from the traced track (not manual placement).
-- **NP2.0 4-shank, one probe** — the four tracing layers are the four shanks.
+- **Auto-generate** electrodes from the traced track.
+- **NP2.0 4-shank, one probe** — four tracing layers = the four shanks.
 - Each shank traced as a **polyline** (ordered points, deepest → shallowest
-  site); sites distributed **by arc-length** so curvature is handled.
-- **Endpoints = first & last recorded site.** The two ends of the polyline are
-  the deepest and shallowest recorded rows; the `n_site_rows` rows are placed at
-  even arc-length fractions between them. No µm/pixel scale is needed.
-- **Two-column grid.** Each row yields two sites (NP2.0's two columns), offset
-  horizontally from the track. `n_rows × 2` points per shank.
-- **New seg_type**, one CSV per shank, in the dmc layout.
+  electrode); electrodes distributed **by arc-length** so curvature is handled.
+- **Endpoints = deepest & shallowest template electrode.** The polyline ends are
+  the electrode at `z_min` (tip, z = 0 µm) and the electrode at `z_max` (z = 705
+  µm in the baked template); each electrode is placed at arc-length fraction
+  `(z − z_min)/(z_max − z_min)`. No µm/pixel scale needed.
+- **True two-column geometry.** Each depth row has two electrodes at their real
+  on-shank x (27 and 59 µm); the column offset is scaled self-consistently to
+  the normalised track (see geometry below).
+- **Baked electrode template** from the example geommap (channelmap-independent
+  physical layout); **no recording-channel** identity.
+- **New seg_type**, one CSV per shank, in the dmc folder layout.
 
-## NP2.0 geometry reference
+## Baked electrode template
+
+Generated from
+`Z:\haeslerlabwip2024\raw_data\ephys\260228_RDP282_g0\260228_RDP282_g0_imec0\260228_RDP282_g0_t0.imec0.ap.meta`
+(`snsGeomMap`, probe `NP2010`). Standard NP2.0 4-shank geometry:
 
 - 4 shanks, 250 µm shank pitch, 70 µm shank width.
-- Electrodes in **2 columns**, 32 µm horizontal spacing, 15 µm vertical (row)
-  pitch. 384 channels recordable at once (≈96 sites / 48 rows per shank when
-  spread over all four shanks — a sensible default, but configuration-dependent).
+- Per shank: **48 rows** at z = 0, 15, 30 … 705 µm (15 µm pitch); **2 columns**
+  at x = **27 and 59 µm** (32 µm apart, shank-centre 43 µm). 96 electrodes/shank,
+  384 total.
+- Physical electrode id within a shank: `electrode = row * 2 + col`
+  (`row = z / 15`, `col = 0` → x = 27, `col = 1` → x = 59). Channelmap-independent.
+
+Baked as explicit arrays with a provenance header and a one-line note on how to
+regenerate (re-parse a `snsGeomMap` if the standard layout ever changes).
 
 ## On-disk convention (extends the existing contract)
 
 `segmentation/neuropixels_2.0/shank_<i>/<image_stem>_neuropixels_2.0.csv`
 
-Columns: `Position Y`, `Position X`, `row`, `col` (plus the default pandas index
-column, matching the existing dmc points CSVs). `row` is `0 … n_rows-1` with
-`row 0` = the first traced endpoint (deepest site); `col ∈ {0, 1}`. One file per
-shank; shanks with fewer than two traced points write nothing (and remove a
-stale file of the same name).
+Columns (plus the default pandas index column, matching existing dmc CSVs):
+
+| column | meaning |
+|--------|---------|
+| `Position Y`, `Position X` | reconstructed histology pixel coords |
+| `shank` | shank index 0–3 |
+| `electrode` | physical electrode id within shank (`row*2+col`) |
+| `row` | depth row index (0 = deepest, z = 0) |
+| `col` | column index (0 → x = 27 µm, 1 → x = 59 µm) |
+| `x_um`, `z_um` | on-shank physical coordinates (µm) |
+
+One file per shank; shanks with fewer than two traced points write nothing (and
+remove a stale file of the same name).
 
 ## Components
 
-### 1. `np2_geometry.py` (new, pure logic — no Qt / napari)
+### 1. `np2_layout.py` (new, pure data — no Qt / napari)
+
+Baked template + a helper returning one shank's electrodes:
 
 ```
-generate_site_coords(track_vertices, n_rows, n_columns,
-                     row_pitch_um, column_spacing_um) -> (coords, rows, cols)
+N_SHANKS = 4
+shank_electrodes(shank) -> list of dicts/records with
+    {electrode, row, col, x_um, z_um}
 ```
 
-- `track_vertices`: ordered `(N, 2)` array of `(Y, X)` polyline vertices
-  (deepest → shallowest). Requires `N ≥ 2`.
-- Compute cumulative arc-length along the polyline. For each row
-  `k = 0 … n_rows-1`, the target arc-length is `k/(n_rows-1) · L` (`L` = total
-  length). Interpolate the `(Y, X)` position on the segment that contains that
-  arc-length; record the **local unit tangent** of that segment.
-- For `n_columns == 2`: the horizontal offset that separates the two columns is
-  `offset_px = (column_spacing_um / row_pitch_um) · per_row_arc_px`, where
-  `per_row_arc_px = L / (n_rows-1)` is the pixel length of one row step (which
-  represents `row_pitch_um`). This keeps the column offset self-consistent with
-  the normalised track. Place `col 0` at `P − ½·offset_px·n̂` and `col 1` at
-  `P + ½·offset_px·n̂`, where `n̂` is the local tangent rotated 90°. (The sign
-  convention for which column is 0 vs 1 is fixed but arbitrary; it does not
-  affect the anatomical location.)
-- For `n_columns == 1`: one point per row on the track centreline.
-- Returns the flattened list of site coordinates plus parallel `row` and `col`
-  index arrays, ordered row-major.
-- Edge cases: `n_rows == 1` places a single row at the deepest endpoint with no
-  column scaling (offset 0); a zero-length track (all vertices coincident)
-  raises `ValueError`.
+Backed by explicit `SHANK_Z_UM` (48 values) and `SHANK_X_UM` (`[27, 59]`) arrays
+with the provenance/regeneration header.
 
-### 2. `io.py` — add `save_sites`
+### 2. `np2_geometry.py` (new, pure logic — no Qt / napari)
 
 ```
-save_sites(coords, rows, cols, input_path, seg_type, shank_id, stem) -> Path|None
+place_electrodes_on_track(track_vertices, z_um, x_um) -> coords
 ```
 
-Writes the four-column CSV described above under
+- `track_vertices`: ordered `(N ≥ 2, 2)` array of `(Y, X)` polyline vertices,
+  deepest → shallowest.
+- `z_um`, `x_um`: per-electrode on-shank coordinates (parallel arrays).
+- Compute cumulative arc-length `L`. Let `z_min, z_max = min(z_um), max(z_um)`
+  and `z_span = z_max − z_min`. Scale `px_per_um = L / z_span`.
+- For each electrode: fraction `f = (z − z_min)/z_span`; interpolate `(Y, X)` at
+  arc-length `f·L` on the containing segment; record the segment's **local unit
+  tangent**. Offset by the column: `(x − x_centre)·px_per_um` along the local
+  perpendicular `n̂`, where `x_centre = (min(x_um)+max(x_um))/2`.
+- Returns an `(M, 2)` array of `(Y, X)` coordinates, one per electrode, in the
+  input order.
+- Edge cases: `< 2` vertices or zero-length track → `ValueError`; `z_span == 0`
+  (all electrodes same depth) → `ValueError`.
+
+### 3. `io.py` — add `save_sites`
+
+```
+save_sites(coords, records, input_path, seg_type, shank_id, stem) -> Path|None
+```
+
+`records` is the per-electrode template info (`electrode, row, col, x_um, z_um`)
+aligned with `coords`. Writes the CSV described above under
 `segmentation/<seg_type>/<shank_id>/`. Empty `coords` removes a stale file and
 returns `None`. Mirrors the existing `save_points_layer` conventions.
 
-### 3. `constants.py`
+### 4. `constants.py`
 
-- Add `"neuropixels_2.0"` to `ALL_SEG_TYPES`.
-- `SITE_SEG_TYPES = {"neuropixels_2.0"}` (handled separately from
-  `PROBE_SEG_TYPES`).
-- Defaults: `NP2_DEFAULT_ROWS = 48`, `NP2_DEFAULT_COLUMNS = 2`,
-  `NP2_ROW_PITCH_UM = 15.0`, `NP2_COLUMN_SPACING_UM = 32.0`.
+- `"neuropixels_2.0"` in `ALL_SEG_TYPES` (already added in Task 1).
+- `SITE_SEG_TYPES = {"neuropixels_2.0"}` (already added).
+- The earlier NP2 even-spacing defaults (`NP2_DEFAULT_ROWS`,
+  `NP2_DEFAULT_COLUMNS`, `NP2_ROW_PITCH_UM`, `NP2_COLUMN_SPACING_UM`) are
+  **removed** — the layout now lives in `np2_layout.py`.
 
-### 4. `_widget.py`
+### 5. `_widget.py`
 
-**New parameters** (magicgui form): `n_site_rows` (SpinBox, default 48),
-`n_columns` (SpinBox 1–2, default 2), `row_pitch_um` (FloatSpinBox, 15.0),
-`column_spacing_um` (FloatSpinBox, 32.0). The existing `n_probes` spinbox is
-reused as the shank count for this type. (These extra fields are always present;
-they are simply only meaningful for `neuropixels_2.0`.)
+**No new geometry parameters** (the even-spacing fields are dropped). The
+existing `n_probes` spinbox is reused as the shank count (default 4).
 
 **Load flow** — when `seg_type` ∈ `SITE_SEG_TYPES`, `_add_tracing_layers`
-creates `n_shanks` **track** point layers named `neuropixels_2.0_track_<i>` for
-tracing the polyline. (Image reference/segmentation layers load unchanged.)
+creates `n_shanks` **track** point layers named `neuropixels_2.0_track_<i>`.
 
-**New "Generate sites" button** → `_generate_sites`:
-- For each `neuropixels_2.0_track_<i>` layer with ≥ 2 points, call
-  `generate_site_coords(...)` with the widget parameters and add (or replace) a
-  points layer `neuropixels_2.0_sites_<i>` showing the reconstructed grid.
-- Tracks with < 2 points are skipped with a `show_info` note.
+**"Generate sites" button** → `_generate_sites`: for each
+`neuropixels_2.0_track_<i>` layer with ≥ 2 points, pull that shank's template
+electrodes, call `place_electrodes_on_track(...)`, and add/replace a points layer
+`neuropixels_2.0_sites_<i>`. Tracks with < 2 points are skipped with a
+`show_info` note.
 
-**Save flow** — when `seg_type` ∈ `SITE_SEG_TYPES`: for each shank, if a
-`neuropixels_2.0_sites_<i>` layer is missing, generate it on the fly from the
-track (so Save works even if the user skipped the button); then `save_sites(...)`
-to `shank_<i>`. The generated sites layer carries no row/col metadata itself, so
-the coordinates are regenerated at save time to recover `row`/`col` indices
-(single source of truth = `generate_site_coords`).
+**Save flow** — for each shank, regenerate coords from the track + template
+(single source of truth) and `save_sites(...)` to `shank_<i>`. Works even if the
+Generate button was not pressed.
 
 **Reorder** — `_reorder_layers` includes the new track and site layers in its
-bottom group, preserving the established order: segmentation → reference →
-NP2.0 track/site layers.
+bottom group: segmentation → reference → NP2.0 track/site layers.
 
 ## Error handling (each surfaces `show_info`, aborts cleanly)
 
 - A shank track with fewer than two points → skipped during generate/save.
-- Degenerate (zero-length) track → caught, note shown, that shank skipped.
+- Degenerate (zero-length) track or `z_span == 0` → caught, note shown, shank
+  skipped.
 - No track layers present when Generate/Save is pressed → note shown.
 
 ## Testing
 
+- `test_np2_layout.py`: template has 4 shanks × 96 electrodes; z range 0–705,
+  15 µm pitch, 48 rows; x ∈ {27, 59}; `electrode == row*2+col`.
 - `test_np2_geometry.py` (pure):
-  - Straight vertical track, `n_columns=1`: rows evenly spaced along the track,
-    endpoints coincide with the traced ends.
-  - Straight track, `n_columns=2`: two columns symmetric about the centreline
-    with the expected `offset_px`; correct total point count `n_rows·2`.
-  - L-shaped polyline: rows distributed by **arc-length**, not vertex index.
-  - `n_rows == 1`, single coincident vertices, `< 2` vertices — edge behaviour.
-- `test_io.py`: `save_sites` round-trips the four-column CSV; empty input removes
-  a stale file.
-- `test_widget_smoke.py`: selecting `neuropixels_2.0` + load creates
-  `n_shanks` track layers; Generate creates `sites` layers with `n_rows·n_cols`
-  points; Save writes one `shank_<i>` CSV per traced shank with `row`/`col`
-  columns; reorder places NP2.0 layers at the bottom.
+  - Straight vertical track: electrodes land at their true depth fractions; two
+    columns symmetric about the centreline with offset `(x−x_centre)·L/z_span`.
+  - L-shaped polyline: electrodes distributed by **arc-length**, not vertex index.
+  - `< 2` vertices, zero-length track, `z_span == 0` → `ValueError`.
+- `test_io.py`: `save_sites` round-trips the CSV with all identity columns; empty
+  input removes a stale file.
+- `test_widget_smoke.py`: selecting `neuropixels_2.0` + load creates `n_shanks`
+  track layers; Generate creates `sites` layers with 96 points/shank; Save writes
+  one `shank_<i>` CSV per traced shank with the identity columns; reorder places
+  NP2.0 layers at the bottom.
 
 ## Risks
 
-- Column offset uses the row-pitch-derived pixel scale; if the traced endpoints
-  do **not** actually correspond to the first/last recorded row, the absolute
-  offset is off — but the anatomical location (region per depth) is unaffected,
-  and the two columns are only 32 µm apart. Acceptable.
-- Assumes the traced polyline order is deepest → shallowest; the row index
-  orientation depends on it. Documented in the widget tooltip.
+- The template is baked from one example config. If the standard recording layout
+  changes, the template must be regenerated (documented in `np2_layout.py`). The
+  channelmap → electrode join is intentionally downstream, so channelmap changes
+  do **not** require touching this plugin.
+- Column offset assumes the traced endpoints correspond to the template's z_min
+  (tip) and z_max electrodes; if they don't, absolute offsets shift slightly, but
+  region-per-depth is unaffected and the two columns are only 32 µm apart.
+- Assumes the traced polyline order is deepest → shallowest; row orientation
+  depends on it. Documented in the widget tooltip.
