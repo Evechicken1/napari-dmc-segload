@@ -23,7 +23,3 @@ ALL_SEG_TYPES = ["cells", "injection_site", "optic_fiber", "neuropixels_probe",
 
 # Neuropixels 2.0 recording-site reconstruction.
 SITE_SEG_TYPES = {"neuropixels_2.0"}
-NP2_DEFAULT_ROWS = 48
-NP2_DEFAULT_COLUMNS = 2
-NP2_ROW_PITCH_UM = 15.0
-NP2_COLUMN_SPACING_UM = 32.0
