@@ -54,3 +54,34 @@ def test_save_shapes_writes_idx_shape_per_polygon(animal_dir):
     assert set(df["idx_shape"]) == {0, 1}
     assert list(df["idx_shape"]).count(0) == 3
     assert {"Position Y", "Position X", "idx_shape"} <= set(df.columns)
+
+
+from napari_dmc_segload.io import save_sites
+
+
+def test_save_sites_writes_identity_columns(animal_dir):
+    coords = np.array([[0.0, -16.0], [0.0, 16.0]])
+    records = [
+        {"shank": 0, "electrode": 0, "row": 0, "col": 0, "x_um": 27, "z_um": 0},
+        {"shank": 0, "electrode": 1, "row": 0, "col": 1, "x_um": 59, "z_um": 0},
+    ]
+    out = save_sites(coords, records, animal_dir,
+                     "neuropixels_2.0", "shank_0", "img1")
+    assert out == (animal_dir / "segmentation" / "neuropixels_2.0" /
+                   "shank_0" / "img1_neuropixels_2.0.csv")
+    df = pd.read_csv(out)
+    assert {"Position Y", "Position X", "shank", "electrode",
+            "row", "col", "x_um", "z_um"} <= set(df.columns)
+    assert list(df["electrode"]) == [0, 1]
+    assert list(df["col"]) == [0, 1]
+
+
+def test_save_sites_empty_removes_stale_file(animal_dir):
+    out_dir = animal_dir / "segmentation" / "neuropixels_2.0" / "shank_0"
+    out_dir.mkdir(parents=True)
+    stale = out_dir / "img1_neuropixels_2.0.csv"
+    stale.write_text("old")
+    result = save_sites(np.empty((0, 2)), [], animal_dir,
+                        "neuropixels_2.0", "shank_0", "img1")
+    assert result is None
+    assert not stale.exists()

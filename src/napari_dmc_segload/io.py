@@ -72,3 +72,23 @@ def save_shapes_layer(shapes, input_path: Path, seg_type: str, chan: str, stem: 
         frames.append(df)
     pd.concat(frames).to_csv(save_name)
     return save_name
+
+
+def save_sites(coords, records, input_path: Path, seg_type: str,
+               shank_id: str, stem: str):
+    """Write reconstructed NP2.0 electrode coords + physical identity to a CSV.
+    `records` is a list of dicts (shank, electrode, row, col, x_um, z_um) aligned
+    row-for-row with `coords`. Empty coords removes a stale file, returns None."""
+    seg_dir = _seg_dir(input_path, seg_type, shank_id)
+    save_name = _save_name(seg_dir, stem, seg_type)
+    arr = np.asarray(coords)
+    if len(arr) == 0:
+        if save_name.exists():
+            save_name.unlink()
+        return None
+    df = pd.DataFrame(arr, columns=["Position Y", "Position X"])
+    rec = pd.DataFrame(list(records))
+    for c in ["shank", "electrode", "row", "col", "x_um", "z_um"]:
+        df[c] = rec[c].values
+    df.to_csv(save_name)
+    return save_name
