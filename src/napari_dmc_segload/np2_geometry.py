@@ -1,29 +1,34 @@
 import numpy as np
 
 
-def generate_site_coords(track_vertices, n_rows, n_columns=2,
-                         row_pitch_um=15.0, column_spacing_um=32.0):
-    """Reconstruct NP2.0 recording-site coordinates along a traced shank track.
+def place_electrodes_on_track(track_vertices, z_um, x_um):
+    """Reconstruct histology coordinates for electrodes along a traced shank track.
 
     Parameters
     ----------
     track_vertices : (N>=2, 2) array of (Position Y, Position X) polyline
-        vertices in image pixels, ordered deepest -> shallowest site.
-    n_rows : number of electrode rows (depth positions) to place.
-    n_columns : 1 (depth ladder) or 2 (NP2.0 two-column grid).
-    row_pitch_um, column_spacing_um : NP2.0 geometry; used only to scale the
-        horizontal offset between the two columns, self-consistently with the
-        arc-length-normalised track.
+        vertices in image pixels, ordered deepest -> shallowest (z ascending).
+    z_um, x_um : parallel per-electrode on-shank coordinates (micrometres).
+
+    The two polyline endpoints correspond to the electrodes at min(z_um) and
+    max(z_um). Each electrode is placed at arc-length fraction
+    (z - z_min) / (z_max - z_min). Columns are offset by (x - x_centre), scaled
+    by the pixels-per-micron implied by the depth span, along the local
+    perpendicular to the track.
 
     Returns
     -------
-    coords : (M, 2) array of (Y, X) site coordinates, row-major.
-    rows : (M,) int array of row index (0 = deepest endpoint).
-    cols : (M,) int array of column index (0 or 1).
+    coords : (M, 2) array of (Y, X) histology coordinates, one per electrode,
+        in input order.
     """
     verts = np.asarray(track_vertices, dtype=float)
     if verts.ndim != 2 or verts.shape[1] != 2 or verts.shape[0] < 2:
         raise ValueError("track_vertices must be an (N>=2, 2) array")
+
+    z = np.asarray(z_um, dtype=float)
+    x = np.asarray(x_um, dtype=float)
+    if z.ndim != 1 or z.shape != x.shape:
+        raise ValueError("z_um and x_um must be 1-D arrays of equal length")
 
     seg = np.diff(verts, axis=0)
     seg_len = np.hypot(seg[:, 0], seg[:, 1])
@@ -32,14 +37,16 @@ def generate_site_coords(track_vertices, n_rows, n_columns=2,
     if total == 0:
         raise ValueError("track has zero length")
 
-    per_row_arc = total / (n_rows - 1) if n_rows > 1 else 0.0
-    offset_px = 0.0
-    if n_columns == 2 and n_rows > 1:
-        offset_px = (column_spacing_um / row_pitch_um) * per_row_arc
+    z_min, z_max = float(z.min()), float(z.max())
+    z_span = z_max - z_min
+    if z_span == 0:
+        raise ValueError("all electrodes share the same depth (z_span == 0)")
+    px_per_um = total / z_span
+    x_centre = 0.5 * (float(x.min()) + float(x.max()))
 
-    coords, rows, cols = [], [], []
-    for k in range(n_rows):
-        target = (k / (n_rows - 1)) * total if n_rows > 1 else 0.0
+    coords = []
+    for zi, xi in zip(z, x):
+        target = (zi - z_min) / z_span * total
         j = int(np.searchsorted(cum, target, side="right") - 1)
         j = min(max(j, 0), len(seg_len) - 1)
         local = (target - cum[j]) / seg_len[j] if seg_len[j] > 0 else 0.0
@@ -50,10 +57,6 @@ def generate_site_coords(track_vertices, n_rows, n_columns=2,
         tangent = tangent / norm if norm > 0 else np.array([1.0, 0.0])
         perp = np.array([-tangent[1], tangent[0]])  # rotate 90 deg in (Y, X)
 
-        if n_columns == 2 and n_rows > 1:
-            coords.append(pos - 0.5 * offset_px * perp); rows.append(k); cols.append(0)
-            coords.append(pos + 0.5 * offset_px * perp); rows.append(k); cols.append(1)
-        else:
-            coords.append(pos); rows.append(k); cols.append(0)
+        coords.append(pos + (xi - x_centre) * px_per_um * perp)
 
-    return np.array(coords), np.array(rows, dtype=int), np.array(cols, dtype=int)
+    return np.array(coords)
