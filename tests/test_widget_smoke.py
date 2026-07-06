@@ -71,3 +71,45 @@ def test_save_out_of_range_index_aborts_cleanly(make_napari_viewer, animal_dir):
     out_dir = animal_dir / "segmentation" / "cells" / "cy3"
     # no file written for the out-of-range index
     assert not any(out_dir.glob("*99*")) if out_dir.exists() else True
+
+
+import pandas as pd
+
+
+def test_np2_load_creates_track_layers(make_napari_viewer, animal_dir):
+    viewer = make_napari_viewer()
+    w = SegLoaderWidget(viewer)
+    _configure(w, animal_dir, ref=["dapi"], seg=[], seg_type="neuropixels_2.0")
+    w.form.n_probes.value = 4
+    w._load_into_viewer()
+    names = [ly.name for ly in viewer.layers]
+    for i in range(4):
+        assert f"neuropixels_2.0_track_{i}" in names
+
+
+def test_np2_generate_creates_site_layer(make_napari_viewer, animal_dir):
+    viewer = make_napari_viewer()
+    w = SegLoaderWidget(viewer)
+    _configure(w, animal_dir, ref=["dapi"], seg=[], seg_type="neuropixels_2.0")
+    w.form.n_probes.value = 1
+    w._load_into_viewer()
+    viewer.layers["neuropixels_2.0_track_0"].data = np.array([[0.0, 0.0], [705.0, 0.0]])
+    w._generate_sites()
+    assert len(viewer.layers["neuropixels_2.0_sites_0"].data) == 96  # 48 rows x 2 cols
+
+
+def test_np2_save_writes_per_shank_csv(make_napari_viewer, animal_dir):
+    viewer = make_napari_viewer()
+    w = SegLoaderWidget(viewer)
+    _configure(w, animal_dir, ref=["dapi"], seg=[], seg_type="neuropixels_2.0")
+    w.form.n_probes.value = 1
+    w._load_into_viewer()
+    viewer.layers["neuropixels_2.0_track_0"].data = np.array([[0.0, 0.0], [705.0, 0.0]])
+    w._save_segmentation()
+    out = (animal_dir / "segmentation" / "neuropixels_2.0" / "shank_0" /
+           "animal01_obj1_1_stitched_neuropixels_2.0.csv")
+    assert out.exists()
+    df = pd.read_csv(out)
+    assert {"Position Y", "Position X", "shank", "electrode",
+            "row", "col", "x_um", "z_um"} <= set(df.columns)
+    assert len(df) == 96

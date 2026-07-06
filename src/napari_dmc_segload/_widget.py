@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 from napari import Viewer
 from napari.utils.notifications import show_info
 from magicgui import magicgui
@@ -13,15 +14,19 @@ from .constants import (
     POINT_SEG_TYPES,
     SHAPE_SEG_TYPES,
     PROBE_SEG_TYPES,
+    SITE_SEG_TYPES,
     ALL_SEG_TYPES,
 )
 from .channel_scanner import ChannelScanner
+from .np2_layout import shank_electrodes
+from .np2_geometry import place_electrodes_on_track
 from .io import (
     resolve_image,
     image_stem,
     load_grayscale,
     save_points_layer,
     save_shapes_layer,
+    save_sites,
 )
 
 
@@ -67,6 +72,10 @@ class SegLoaderWidget(QWidget):
         self.btn_load = QPushButton("Load into viewer")
         self.btn_load.clicked.connect(self._load_into_viewer)
         self.layout().addWidget(self.btn_load)
+
+        self.btn_generate = QPushButton("Generate NP2.0 sites")
+        self.btn_generate.clicked.connect(self._generate_sites)
+        self.layout().addWidget(self.btn_generate)
 
         self.btn_save = QPushButton("Save segmentation")
         self.btn_save.clicked.connect(self._save_segmentation)
@@ -121,7 +130,10 @@ class SegLoaderWidget(QWidget):
         return True
 
     def _add_tracing_layers(self, seg_type, seg_channels, n_probes, point_size):
-        if seg_type in PROBE_SEG_TYPES:
+        if seg_type in SITE_SEG_TYPES:
+            for i in range(n_probes):
+                self.viewer.add_points(name=f"{seg_type}_track_{i}", size=point_size)
+        elif seg_type in PROBE_SEG_TYPES:
             for i in range(n_probes):
                 self.viewer.add_points(name=f"{seg_type}_{i}", size=point_size)
         elif seg_type in SHAPE_SEG_TYPES:
@@ -131,6 +143,46 @@ class SegLoaderWidget(QWidget):
             for chan in seg_channels:
                 self.viewer.add_points(name=chan, size=point_size)
 
+    def _sites_for_shank(self, i):
+        """(coords, records) for shank i, or None if the track is unusable."""
+        seg_type = self.form.seg_type.value
+        track_name = f"{seg_type}_track_{i}"
+        if track_name not in self.viewer.layers:
+            return None
+        verts = np.asarray(self.viewer.layers[track_name].data)
+        if len(verts) < 2:
+            return None
+        records = shank_electrodes(i)
+        z_um = [r["z_um"] for r in records]
+        x_um = [r["x_um"] for r in records]
+        try:
+            coords = place_electrodes_on_track(verts, z_um, x_um)
+        except ValueError as e:
+            show_info(str(e))
+            return None
+        return coords, records
+
+    def _generate_sites(self):
+        seg_type = self.form.seg_type.value
+        if seg_type not in SITE_SEG_TYPES:
+            show_info("Generate sites is only for the neuropixels_2.0 type.")
+            return
+        point_size = int(self.form.point_size.value)
+        any_generated = False
+        for i in range(int(self.form.n_probes.value)):
+            result = self._sites_for_shank(i)
+            if result is None:
+                continue
+            coords, _ = result
+            name = f"{seg_type}_sites_{i}"
+            if name in self.viewer.layers:
+                self.viewer.layers[name].data = coords
+            else:
+                self.viewer.add_points(coords, name=name, size=point_size)
+            any_generated = True
+        if not any_generated:
+            show_info("No shank tracks with >=2 points to generate sites from.")
+
     def _reorder_layers(self, ref, seg, seg_type, n_probes):
         """Enforce a fixed top→bottom layer order in the layer list:
         segmentation image(s), reference image(s), then probe/tracing layers."""
@@ -138,6 +190,10 @@ class SegLoaderWidget(QWidget):
         top_to_bottom += [f"{chan} channel" for chan in ref]
         if seg_type in PROBE_SEG_TYPES:
             top_to_bottom += [f"{seg_type}_{i}" for i in range(n_probes)]
+        elif seg_type in SITE_SEG_TYPES:
+            for i in range(n_probes):
+                top_to_bottom.append(f"{seg_type}_track_{i}")
+                top_to_bottom.append(f"{seg_type}_sites_{i}")
         else:  # point/shape tracing layers share the channel name
             top_to_bottom += list(seg)
         # add_* appends to the top of the list; moving each layer to the top
@@ -178,6 +234,22 @@ class SegLoaderWidget(QWidget):
             stem = image_stem(input_path, (seg + ref)[0], idx)
         except IndexError as e:
             show_info(str(e))
+            return
+
+        if seg_type in SITE_SEG_TYPES:
+            saved = False
+            for i in range(int(self.form.n_probes.value)):
+                result = self._sites_for_shank(i)
+                if result is None:
+                    continue
+                coords, records = result
+                save_sites(coords, records, input_path, seg_type,
+                           f"shank_{i}", stem)
+                saved = True
+            if not saved:
+                show_info("No shank tracks with >=2 points to save.")
+                return
+            show_info("Segmentation saved.")
             return
 
         if seg_type in PROBE_SEG_TYPES:
