@@ -141,11 +141,15 @@ def test_electrodes_land_at_true_depth_fraction():
 
 def test_two_columns_symmetric_about_centreline():
     verts = np.array([[0.0, 0.0], [705.0, 0.0]])  # px_per_um = 705/705 = 1
-    z = np.array([0.0, 0.0])
-    x = np.array([27.0, 59.0])  # centre 43 -> +/-16 px in X
+    # Two depth rows (z 0 and 705) so the depth span defines the pixel scale;
+    # each row has both columns at x = 27 and 59 (shank centre 43 -> +/-16 px).
+    z = np.array([0.0, 0.0, 705.0, 705.0])
+    x = np.array([27.0, 59.0, 27.0, 59.0])
     coords = place_electrodes_on_track(verts, z, x)
     np.testing.assert_allclose(coords[0], [0.0, -16.0])
     np.testing.assert_allclose(coords[1], [0.0, 16.0])
+    np.testing.assert_allclose(coords[2], [705.0, -16.0])
+    np.testing.assert_allclose(coords[3], [705.0, 16.0])
 
 
 def test_distributed_by_arc_length_on_bent_track():
