@@ -18,7 +18,7 @@ from .constants import (
     ALL_SEG_TYPES,
 )
 from .channel_scanner import ChannelScanner
-from .np2_layout import shank_electrodes
+from .np2_layout import N_SHANKS, shank_electrodes
 from .np2_geometry import place_electrodes_on_track
 from .io import (
     resolve_image,
@@ -131,7 +131,7 @@ class SegLoaderWidget(QWidget):
 
     def _add_tracing_layers(self, seg_type, seg_channels, n_probes, point_size):
         if seg_type in SITE_SEG_TYPES:
-            for i in range(n_probes):
+            for i in range(N_SHANKS):
                 self.viewer.add_points(name=f"{seg_type}_track_{i}", size=point_size)
         elif seg_type in PROBE_SEG_TYPES:
             for i in range(n_probes):
@@ -169,7 +169,7 @@ class SegLoaderWidget(QWidget):
             return
         point_size = int(self.form.point_size.value)
         any_generated = False
-        for i in range(int(self.form.n_probes.value)):
+        for i in range(N_SHANKS):
             result = self._sites_for_shank(i)
             if result is None:
                 continue
@@ -182,6 +182,10 @@ class SegLoaderWidget(QWidget):
             any_generated = True
         if not any_generated:
             show_info("No shank tracks with >=2 points to generate sites from.")
+            return
+        ref, seg = self._selected_channels()
+        if ref is not None:
+            self._reorder_layers(ref, seg, seg_type, N_SHANKS)
 
     def _reorder_layers(self, ref, seg, seg_type, n_probes):
         """Enforce a fixed top→bottom layer order in the layer list:
@@ -191,7 +195,7 @@ class SegLoaderWidget(QWidget):
         if seg_type in PROBE_SEG_TYPES:
             top_to_bottom += [f"{seg_type}_{i}" for i in range(n_probes)]
         elif seg_type in SITE_SEG_TYPES:
-            for i in range(n_probes):
+            for i in range(N_SHANKS):
                 top_to_bottom.append(f"{seg_type}_track_{i}")
                 top_to_bottom.append(f"{seg_type}_sites_{i}")
         else:  # point/shape tracing layers share the channel name
@@ -238,7 +242,7 @@ class SegLoaderWidget(QWidget):
 
         if seg_type in SITE_SEG_TYPES:
             saved = False
-            for i in range(int(self.form.n_probes.value)):
+            for i in range(N_SHANKS):
                 result = self._sites_for_shank(i)
                 if result is None:
                     continue

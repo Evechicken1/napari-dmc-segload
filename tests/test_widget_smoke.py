@@ -113,3 +113,22 @@ def test_np2_save_writes_per_shank_csv(make_napari_viewer, animal_dir):
     assert {"Position Y", "Position X", "shank", "electrode",
             "row", "col", "x_um", "z_um"} <= set(df.columns)
     assert len(df) == 96
+
+
+def test_np2_uses_four_shanks_regardless_of_spinbox(make_napari_viewer, animal_dir):
+    viewer = make_napari_viewer()
+    w = SegLoaderWidget(viewer)
+    _configure(w, animal_dir, ref=["dapi"], seg=[], seg_type="neuropixels_2.0")
+    # deliberately do NOT set w.form.n_probes.value (defaults to 1)
+    w._load_into_viewer()
+    names = [ly.name for ly in viewer.layers]
+    for i in range(4):
+        assert f"neuropixels_2.0_track_{i}" in names
+    # trace all four shanks, then save -> four CSVs
+    for i in range(4):
+        viewer.layers[f"neuropixels_2.0_track_{i}"].data = np.array([[0.0, 0.0], [705.0, 0.0]])
+    w._save_segmentation()
+    for i in range(4):
+        out = (animal_dir / "segmentation" / "neuropixels_2.0" / f"shank_{i}" /
+               f"animal01_obj1_1_stitched_neuropixels_2.0.csv")
+        assert out.exists()
