@@ -5,6 +5,11 @@ contributions:
     - id: napari-dmc-segload.SegLoaderWidget
       python_name: napari_dmc_segload._widget:SegLoaderWidget
       title: Open Segmentation Loader
+    - id: napari-dmc-segload.SectionWidget
+      python_name: napari_dmc_segload._section_widget:SectionWidget
+      title: Section slides
   widgets:
     - command: napari-dmc-segload.SegLoaderWidget
       display_name: Segmentation loader
+    - command: napari-dmc-segload.SectionWidget
+      display_name: Section slides

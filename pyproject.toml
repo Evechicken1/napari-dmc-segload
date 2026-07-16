@@ -15,6 +15,9 @@ dependencies = [
     "natsort",
     "magicgui",
     "qtpy",
+    "tifffile",
+    "zarr",
+    "aicspylibczi",
 ]
 
 [project.optional-dependencies]
