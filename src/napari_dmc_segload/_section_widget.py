@@ -19,7 +19,7 @@ from magicgui.widgets import FunctionGui
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
 
 from .readers import make_reader, to_16bit, ZERO_PAD
-from .numbering import compute_slice_numbers
+from .numbering import compute_slice_numbers, next_slice_number
 
 # napari display colour per DMC label (purely cosmetic).
 DISPLAY_CMAP = {"dapi": "blue", "green": "green", "n3": "cyan",
@@ -242,17 +242,28 @@ class SectionWidget(QWidget):
         for label in self.labels:
             (out_base / label).mkdir(parents=True, exist_ok=True)
 
+        # continue numbering after any slices already written for this animal
+        offset = next_slice_number(out_base, animal_id) - 1
+
         n = 0
+        written = []
         for num, r0, r1, c0, c1 in boxes:
             if r1 <= r0 or c1 <= c0:
                 continue
-            fname = f"{animal_id}_s{str(num).zfill(ZERO_PAD)}.tif"
+            out_num = num + offset
+            fname = f"{animal_id}_s{str(out_num).zfill(ZERO_PAD)}.tif"
             for ci, label in enumerate(self.labels):
                 crop = to_16bit(self.reader.crop_fullres(ci, r0, r1, c0, c1))
                 tifffile.imwrite(out_base / label / fname, crop)
+            written.append(out_num)
             n += 1
 
-        show_info(f"wrote {n} slices -> {out_base}")
+        if written:
+            span = (f"s{str(written[0]).zfill(ZERO_PAD)}-"
+                    f"s{str(written[-1]).zfill(ZERO_PAD)}")
+            show_info(f"wrote {n} slices ({span}) -> {out_base}")
+        else:
+            show_info(f"wrote {n} slices -> {out_base}")
         if n > 0:
             self._remove_section_layers()          # clear for the next slide
             self.reader = None

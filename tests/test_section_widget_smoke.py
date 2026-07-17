@@ -57,6 +57,36 @@ def test_export_writes_dmc_tree(make_napari_viewer, tmp_path):
     assert "slices" not in [ly.name for ly in viewer.layers]
 
 
+def test_export_continues_numbering_from_existing_slices(make_napari_viewer, tmp_path):
+    p = tmp_path / "slide.tif"
+    _write_multichannel_tif(p, n_ch=3, h=40, w=60)
+    out_root = tmp_path / "dmc_input"
+    # pretend a previous slide already wrote s001, s002
+    stitched = out_root / "m1" / "stitched"
+    for label in ("green", "cy3", "dapi"):
+        (stitched / label).mkdir(parents=True, exist_ok=True)
+        for n in (1, 2):
+            (stitched / label / f"m1_s{n:03d}.tif").touch()
+
+    viewer = make_napari_viewer()
+    w = SectionWidget(viewer)
+    w.form.input_path.value = str(p)
+    w.form.animal_id.value = "m1"
+    w.form.output_root.value = str(out_root)
+    w.form.channel_labels.value = "green,cy3,dapi"
+    w.form.order_by.value = "draw"
+    w.form.overview_scale.value = 0.1
+    w._load_overview()
+    # two rectangles -> should land at s003, s004, not overwrite s001/s002
+    viewer.layers["slices"].data = [_rect(0, 0, 2, 6), _rect(2, 0, 4, 6)]
+    w._export()
+    green = stitched / "green"
+    assert (green / "m1_s003.tif").exists()
+    assert (green / "m1_s004.tif").exists()
+    # the pre-existing placeholders are untouched (still empty)
+    assert (green / "m1_s001.tif").stat().st_size == 0
+
+
 def test_export_without_load_is_a_noop(make_napari_viewer, tmp_path):
     viewer = make_napari_viewer()
     w = SectionWidget(viewer)
