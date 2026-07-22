@@ -34,6 +34,12 @@ def test_recover_probe_insert_from_depth_plus_dtt():
     assert abs(recover_probe_insert(df) - 4000) < 1e-6
 
 
+def test_recover_line_too_few_rows_raises():
+    df = _synthetic_tract(np.zeros(3), np.zeros(3), insert=1000, n=1)
+    with pytest.raises(ValueError):
+        recover_line(df, COLS)
+
+
 def test_recover_line_missing_column_raises():
     df = _synthetic_tract(np.zeros(3), np.zeros(3), insert=1000).drop(columns=["ml_coords"])
     with pytest.raises(ValueError):

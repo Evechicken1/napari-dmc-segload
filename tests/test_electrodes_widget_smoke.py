@@ -72,3 +72,17 @@ def test_reconstruct_requires_two_shanks(tmp_path):
 def test_reconstruct_missing_results_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         reconstruct_electrodes(tmp_path / "nope", _FakeAtlas())
+
+
+def test_shank_index_comes_from_folder_name_not_position(tmp_path):
+    # Only shanks 0 and 2 were traced. Each output must carry its true physical
+    # shank number (0 and 2), not the sort positions (0 and 1).
+    base = tmp_path / "animal01"
+    root = base / "results" / "neuropixels_probe"
+    _write_tract(root / "neuropixels_probe_0", tip=(60, 120, 40), insert=2000)
+    _write_tract(root / "neuropixels_probe_2", tip=(60, 120, 90), insert=2000)
+    written = reconstruct_electrodes(base, _FakeAtlas())
+    shanks = {out.parent.name: pd.read_csv(out)["shank"].unique().tolist()
+              for out in written}
+    assert shanks["neuropixels_probe_0"] == [0]
+    assert shanks["neuropixels_probe_2"] == [2]

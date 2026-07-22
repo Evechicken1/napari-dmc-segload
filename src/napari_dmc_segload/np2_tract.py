@@ -23,6 +23,8 @@ def recover_line(tract_df, coord_cols):
     """
     if DIST_COL not in tract_df.columns:
         raise ValueError(f"tract CSV missing column '{DIST_COL}'")
+    if len(tract_df) < 2:
+        raise ValueError("tract CSV needs >= 2 rows to fit a line")
     dtt = tract_df[DIST_COL].to_numpy(dtype=float)
     point = np.empty(3)
     slope = np.empty(3)

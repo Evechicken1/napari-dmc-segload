@@ -7,6 +7,7 @@ coordinates and region.
 """
 
 import json
+import re
 from pathlib import Path
 
 from natsort import natsorted
@@ -47,30 +48,43 @@ def reconstruct_electrodes(input_path, atlas):
 
     coord_cols = [AXIS_TO_COORD_COL[ax] for ax in atlas.space.axes_description]
 
-    fits = []  # (shank_dir, point, slope, probe_insert)
+    # (shank_dir, shank_idx, point, slope, probe_insert). The shank index is
+    # parsed from the folder name (e.g. "neuropixels_probe_2" -> 2), NOT the
+    # sort position, so a missing/untraced shank never re-labels the others.
+    fits = []
     for sd in shank_dirs:
         csvs = list(sd.glob("*.csv"))
         if not csvs:
             raise FileNotFoundError(f"no tract CSV in {sd}")
         df = load_tract_csv(csvs[0])
         point, slope = recover_line(df, coord_cols)
-        fits.append((sd, point, slope, recover_probe_insert(df)))
+        fits.append((sd, _shank_index(sd.name), point, slope, recover_probe_insert(df)))
 
-    tip_min = fits[0][1]
-    tip_max = fits[-1][1]
+    # Lateral axis spans the two extreme traced shanks (first/last by name order).
+    tip_min = fits[0][2]
+    tip_max = fits[-1][2]
     animal = input_path.name
 
     written = []
-    for shank_idx, (sd, point, slope, probe_insert) in enumerate(fits):
+    for sd, shank_idx, point, slope, probe_insert in fits:
         lat = lateral_axis(tip_min, tip_max, shank_direction(slope))
         electrodes = shank_electrodes(shank_idx)
         df = place_electrodes(point, slope, probe_insert, lat, electrodes, coord_cols)
         df = annotate_regions(df, atlas, coord_cols)
         df = df[df["depth_um"] >= INSIDE_BRAIN_DEPTH_UM].reset_index(drop=True)
         out = sd / f"{animal}_np2_electrodes.csv"
-        df.to_csv(out)
+        df.to_csv(out, index=False)
         written.append(out)
     return written
+
+
+def _shank_index(folder_name):
+    """Physical shank index from a dmc probe folder name, e.g.
+    'neuropixels_probe_2' -> 2. Raises ValueError if no number is present."""
+    nums = re.findall(r"\d+", folder_name)
+    if not nums:
+        raise ValueError(f"cannot parse a shank index from folder '{folder_name}'")
+    return int(nums[-1])
 
 
 def _load_atlas(input_path):
