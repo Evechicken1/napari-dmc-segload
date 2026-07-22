@@ -9,8 +9,11 @@ re-parse a snsGeomMap and update SHANK_Z_UM / SHANK_X_UM below.
 """
 
 N_SHANKS = 4
-# 48 depth rows, 15 um pitch, z from the shank tip (deepest electrode = 0 um).
-SHANK_Z_UM = [15 * r for r in range(48)]  # 0, 15, ..., 705
+# Full NP2.0 4-shank (NP2010) shank: 640 depth rows, 15 um pitch, z measured from
+# the shank tip (deepest electrode = 0 um). The 27/59 um columns and 15 um pitch
+# were parsed from the example snsGeomMap; the 640-row (1280 electrode/shank)
+# extent is the NP2010 spec (re-verify against a snsGeomMap/imro if it ever changes).
+SHANK_Z_UM = [15 * r for r in range(640)]  # 0, 15, ..., 9585
 # Two columns across the 70 um shank (centre 43 um).
 SHANK_X_UM = [27, 59]
 
