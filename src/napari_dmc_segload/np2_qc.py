@@ -68,3 +68,90 @@ def region_ladder(df):
             })
             start = i
     return runs
+
+
+def cross_shank_metrics(frames, coord_cols):
+    """Pairwise geometry between shanks: tip distance vs the expected
+    250 um x index span, and the angle between fitted directions.
+
+    Returns a list of {shank_a, shank_b, distance_um, expected_um, angle_deg},
+    one per unordered pair, in ascending shank order.
+    """
+    metrics = {s: shank_metrics(df, coord_cols) for s, df in frames.items()}
+    shanks = sorted(metrics)
+    pairs = []
+    for i, a in enumerate(shanks):
+        for b in shanks[i + 1:]:
+            ma, mb = metrics[a], metrics[b]
+            dist = float(np.linalg.norm(mb["fit_tip"] - ma["fit_tip"]) * VOXEL_UM)
+            cos = abs(float(np.dot(ma["direction"], mb["direction"])))
+            pairs.append({
+                "shank_a": a,
+                "shank_b": b,
+                "distance_um": dist,
+                "expected_um": SHANK_PITCH_UM * abs(b - a),
+                "angle_deg": float(np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))),
+            })
+    return pairs
+
+
+def build_report(frames, coord_cols):
+    """Full QC report: {'shanks': [...], 'pairs': [...], 'warnings': [...]}."""
+    shanks = [shank_metrics(frames[s], coord_cols) for s in sorted(frames)]
+    pairs = cross_shank_metrics(frames, coord_cols)
+    warnings = []
+
+    for m in shanks:
+        if m["n_electrodes"] < MIN_ELECTRODES:
+            warnings.append(
+                f"shank {m['shank']}: only {m['n_electrodes']} electrodes inside the "
+                f"brain (expected >= {MIN_ELECTRODES})")
+        if {r["acronym"] for r in m["ladder"]} <= {"root"}:
+            warnings.append(
+                f"shank {m['shank']}: every electrode is in 'root' — the tract may "
+                "lie outside the annotated brain")
+
+    for p in pairs:
+        off = abs(p["distance_um"] - p["expected_um"])
+        if off > SPACING_TOL_UM:
+            warnings.append(
+                f"shanks {p['shank_a']}-{p['shank_b']}: tip spacing {p['distance_um']:.0f} um, "
+                f"expected {p['expected_um']:.0f} um (off by {off:.0f} um)")
+        if p["angle_deg"] > ANGLE_TOL_DEG:
+            warnings.append(
+                f"shanks {p['shank_a']}-{p['shank_b']}: angle between shanks "
+                f"{p['angle_deg']:.1f} deg, expected < {ANGLE_TOL_DEG:.0f} deg")
+
+    return {"shanks": shanks, "pairs": pairs, "warnings": warnings}
+
+
+def format_report(report, title="NP2.0 probe QC"):
+    """Fixed-width text rendering of `build_report`'s output."""
+    lines = [title, "=" * max(len(title), 60), ""]
+    for m in report["shanks"]:
+        lines.append(f"shank {m['shank']}")
+        lines.append(f"  electrodes inside brain : {m['n_electrodes']}")
+        lines.append(f"  insertion depth (um)    : {m['insertion_depth_um']:.0f}")
+        lines.append(f"  tip voxel (a,b,c)       : {m['tip_voxel']}")
+        lines.append(f"  angle from DV axis      : {m['angle_from_dv_deg']:.1f} deg")
+        lines.append("  region ladder (deep -> superficial):")
+        for r in m["ladder"]:
+            lines.append(
+                f"    {r['acronym']:<10} {r['depth_from_um']:>7.0f} -> "
+                f"{r['depth_to_um']:>7.0f} um   n={r['n_electrodes']}")
+        lines.append("")
+
+    lines.append("shank pairs")
+    for p in report["pairs"]:
+        lines.append(
+            f"  {p['shank_a']}-{p['shank_b']}  tip distance {p['distance_um']:>6.0f} um "
+            f"(expected {p['expected_um']:>6.0f})  angle {p['angle_deg']:>5.1f} deg")
+    lines.append("")
+
+    if report["warnings"]:
+        lines.append("warnings")
+        lines.extend(f"  ! {w}" for w in report["warnings"])
+    else:
+        lines.append("no warnings")
+    lines.append("")
+    return "\n".join(lines)
