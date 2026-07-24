@@ -21,6 +21,8 @@ class _FakeAtlas:
         "ORBl": {"rgb_triplet": [36, 138, 94]},
         "MOs": {"rgb_triplet": [31, 157, 90]},
         "root": {"rgb_triplet": [255, 255, 255]},
+        "ORBm": {"rgb_triplet": [200, 100, 50]},
+        "PL": {"rgb_triplet": [10, 20, 30]},
     }
     meshless = {"MOs"}
 
@@ -121,6 +123,17 @@ def test_region_meshes_ignores_root_and_rare_structures():
     assert skipped == []
 
 
-def test_region_meshes_caps_the_number_of_regions(np2_frames):
-    meshes, _ = region_meshes(np2_frames, _FakeAtlas(), min_electrodes=1, max_regions=1)
-    assert len(meshes) == 1
+def test_region_meshes_caps_the_number_of_regions():
+    # Three meshed structures with distinct electrode counts, all above the
+    # default min_electrodes, so ranking is observable and the cap is the
+    # only thing that can be reducing the result.
+    df = make_electrode_frame(0, n_rows=60).copy()      # 120 electrodes
+    acronyms = np.empty(len(df), dtype=object)
+    acronyms[:60] = "ORBl"      # most electrodes (60)
+    acronyms[60:100] = "ORBm"   # fewer (40)
+    acronyms[100:] = "PL"       # fewest (20)
+    df["acronym"] = acronyms
+
+    meshes, skipped = region_meshes({0: df}, _FakeAtlas(), min_electrodes=1, max_regions=2)
+    assert skipped == []
+    assert [m["acronym"] for m in meshes] == ["ORBl", "ORBm"]     # cap size AND ranking

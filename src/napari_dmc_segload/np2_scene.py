@@ -57,6 +57,9 @@ def point_colors(features, mode, atlas):
     `atlas` is only used by MODE_REGION and may be None otherwise.
     """
     if mode == MODE_SHANK:
+        # % len(SHANK_COLORS) assumes a single 4-shank NP2.0 probe (shank
+        # indices 0-3); a second probe traced into the same tree (indices 4+)
+        # would wrap around and reuse colours.
         idx = features["shank"].to_numpy(dtype=int) % len(SHANK_COLORS)
         return SHANK_COLORS[idx]
 
