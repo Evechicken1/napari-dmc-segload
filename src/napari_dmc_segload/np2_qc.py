@@ -53,7 +53,10 @@ def region_ladder(df):
     """
     if len(df) == 0:
         return []
-    d = df.sort_values("depth_um", ascending=False)
+    # Stable sort: the two electrodes of a row share a depth but can sit in
+    # different structures, so an unstable sort would reorder them and make the
+    # written QC report differ run to run on identical input.
+    d = df.sort_values("depth_um", ascending=False, kind="stable")
     acronyms = d["acronym"].to_numpy()
     depths = d["depth_um"].to_numpy(dtype=float)
     runs = []
