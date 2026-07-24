@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -18,7 +20,8 @@ class _FakeAtlas:
 
 
 class _BadSpace:
-    axes_description = ("ap", "ipl", "rl")
+    # what AnatomicalSpace("ipl") actually yields, not the orientation string itself
+    axes_description = ("is", "pa", "lr")
 
 
 class _BadAtlas:
@@ -126,11 +129,25 @@ def test_load_electrode_csvs_duplicate_shank_index_raises(results_animal):
 
 
 def test_load_electrode_csvs_empty_csv_raises(results_animal):
+    # a well-formed CSV with header but zero rows: a legitimate reconstruction
+    # that placed no electrodes inside the brain for this shank
     d = results_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
     csv = next(d.glob(f"*{ELECTRODE_CSV_SUFFIX}"))
     pd.read_csv(csv).iloc[0:0].to_csv(csv, index=False)
-    with pytest.raises(ValueError, match="has no rows"):
+    with pytest.raises(ValueError, match="no electrodes inside the brain"):
         load_electrode_csvs(results_animal)
+
+
+def test_load_electrode_csvs_zero_byte_csv_raises(results_animal):
+    # a fully empty file (no header) raises pandas EmptyDataError internally;
+    # it must surface as a ValueError naming the file, not a raw pandas error
+    d = results_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
+    csv = next(d.glob(f"*{ELECTRODE_CSV_SUFFIX}"))
+    csv.write_text("")
+    with pytest.raises(ValueError) as exc_info:
+        load_electrode_csvs(results_animal)
+    assert str(csv) in str(exc_info.value)
+    assert "is empty" in str(exc_info.value)
 
 
 def test_load_electrode_csvs_multiple_csvs_in_folder_raises(results_animal):
@@ -161,6 +178,5 @@ def test_load_atlas_missing_atlas_info_raises(tmp_path):
     base.mkdir()
     params_fn = base / "params.json"
     params_fn.write_text('{"foo": "bar"}')
-    with pytest.raises(KeyError) as exc_info:
+    with pytest.raises(ValueError, match=re.escape(str(params_fn))):
         load_atlas(base)
-    assert str(params_fn) in exc_info.value.args[0]

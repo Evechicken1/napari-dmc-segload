@@ -60,9 +60,9 @@ def load_electrode_csvs(input_path):
     Returns {shank_index: DataFrame}, keyed by the index parsed from the folder
     name (never the sort position). Raises FileNotFoundError if no electrode CSV
     exists anywhere, and ValueError if: a folder contains more than one candidate
-    CSV, a CSV is missing a required column or has no rows, a CSV's own 'shank'
-    column disagrees with the index parsed from its folder, or two folders map
-    to the same shank index.
+    CSV, a CSV is a zero-byte file, a CSV is missing a required column or has no
+    rows, a CSV's own 'shank' column disagrees with the index parsed from its
+    folder, or two folders map to the same shank index.
     """
     frames = {}
     seen = {}
@@ -75,12 +75,17 @@ def load_electrode_csvs(input_path):
                 f"{sd} contains {len(csvs)} electrode CSVs "
                 f"({', '.join(c.name for c in csvs)}); keep only the current animal's")
         csv = csvs[0]
-        df = pd.read_csv(csv)
+        try:
+            df = pd.read_csv(csv)
+        except pd.errors.EmptyDataError:
+            raise ValueError(f"{csv} is empty; re-run the 'NP2.0 electrodes' widget") from None
         missing = [c for c in REQUIRED_ELECTRODE_COLS if c not in df.columns]
         if missing:
             raise ValueError(f"{csv} is missing column(s): {', '.join(missing)}")
         if df.empty:
-            raise ValueError(f"{csv} has no rows; re-run the 'NP2.0 electrodes' widget")
+            raise ValueError(
+                f"{csv} has no rows — the reconstruction placed no electrodes "
+                "inside the brain; check the traced tract for this shank")
         idx = shank_index(sd.name)
         col_shanks = sorted(df["shank"].unique().tolist())
         if col_shanks != [idx]:
@@ -120,6 +125,6 @@ def load_atlas(input_path):
     try:
         atlas_name = params["atlas_info"]["atlas"]
     except KeyError:
-        raise KeyError(f"{params_fn} has no ['atlas_info']['atlas'] entry")
+        raise ValueError(f"{params_fn} has no ['atlas_info']['atlas'] entry") from None
     from bg_atlasapi import BrainGlobeAtlas   # imported lazily (heavy, optional in tests)
     return BrainGlobeAtlas(atlas_name)
