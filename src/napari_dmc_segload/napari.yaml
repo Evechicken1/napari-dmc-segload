@@ -11,6 +11,9 @@ contributions:
     - id: napari-dmc-segload.ElectrodesWidget
       python_name: napari_dmc_segload._electrodes_widget:ElectrodesWidget
       title: NP2.0 electrodes
+    - id: napari-dmc-segload.ProbeVisWidget
+      python_name: napari_dmc_segload._probe_vis_widget:ProbeVisWidget
+      title: NP2.0 probe visualization
   widgets:
     - command: napari-dmc-segload.SegLoaderWidget
       display_name: Segmentation loader
@@ -18,3 +21,5 @@ contributions:
       display_name: Section slides
     - command: napari-dmc-segload.ElectrodesWidget
       display_name: NP2.0 electrodes
+    - command: napari-dmc-segload.ProbeVisWidget
+      display_name: NP2.0 probe visualization
