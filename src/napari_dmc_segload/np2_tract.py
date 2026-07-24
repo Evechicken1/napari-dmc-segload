@@ -13,19 +13,21 @@ def load_tract_csv(path):
     return pd.read_csv(path)
 
 
-def recover_line(tract_df, coord_cols):
-    """Least-squares fit of each atlas-coord column against distance_to_tip.
+def recover_line(tract_df, coord_cols, dist_col=DIST_COL):
+    """Least-squares fit of each atlas-coord column against the distance column.
 
     dmc writes coords = (probe_insert - dtt)/10 * direction + surface, i.e. a
     line in dtt. Returns (point, slope), both length-3 arrays in `coord_cols`
     order, where `point` is the coord at dtt=0 (the tip voxel) and `slope` is
     d(coord)/d(dtt). The many rows average out dmc's integer-voxel rounding.
+    `dist_col` defaults to the dmc tract CSV's column; our electrode CSVs use
+    `distance_to_tip_um`.
     """
-    if DIST_COL not in tract_df.columns:
-        raise ValueError(f"tract CSV missing column '{DIST_COL}'")
+    if dist_col not in tract_df.columns:
+        raise ValueError(f"CSV missing column '{dist_col}'")
     if len(tract_df) < 2:
-        raise ValueError("tract CSV needs >= 2 rows to fit a line")
-    dtt = tract_df[DIST_COL].to_numpy(dtype=float)
+        raise ValueError("CSV needs >= 2 rows to fit a line")
+    dtt = tract_df[dist_col].to_numpy(dtype=float)
     point = np.empty(3)
     slope = np.empty(3)
     for k, c in enumerate(coord_cols):
