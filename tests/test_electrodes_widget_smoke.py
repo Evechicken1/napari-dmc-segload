@@ -86,3 +86,11 @@ def test_shank_index_comes_from_folder_name_not_position(tmp_path):
               for out in written}
     assert shanks["neuropixels_probe_0"] == [0]
     assert shanks["neuropixels_probe_2"] == [2]
+
+
+def test_rerun_ignores_previous_electrode_output(animal_dir):
+    first = reconstruct_electrodes(animal_dir, _FakeAtlas())
+    second = reconstruct_electrodes(animal_dir, _FakeAtlas())
+    assert len(second) == len(first) == 2
+    for a, b in zip(first, second):
+        assert pd.read_csv(a).equals(pd.read_csv(b))
