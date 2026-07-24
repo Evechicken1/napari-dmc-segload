@@ -64,14 +64,26 @@ def test_point_colors_by_region_unknown_acronym_is_grey(np2_frames):
 
 
 def test_point_colors_by_electrode_index_normalises_across_shanks():
-    # shank 0 spans electrodes 0..39, shank 1 only 0..19: with joint
-    # normalisation shank 1 must not reach the top of the ramp.
+    # shank 0 spans electrodes 0..39, shank 1 only 0..19. Under joint
+    # normalisation the same electrode index maps to the same colour in
+    # every shank, so shank 1's electrode 19 must match shank 0's electrode
+    # 19 -- and must NOT match shank 0's electrode 39 (the top of the ramp,
+    # which only joint normalisation withholds from shank 1).
     frames = {0: make_electrode_frame(0, n_rows=20), 1: make_electrode_frame(1, n_rows=10)}
     _, features = electrode_points(frames, COLS)
     colors = point_colors(features, "electrode index", None)
-    top_overall = colors[features["electrode"].idxmax()]
-    shank1 = features.index[features["shank"] == 1]
-    assert not np.allclose(colors[shank1].max(axis=0), top_overall)
+
+    def row(shank, electrode):
+        idx = features.index[(features["shank"] == shank) &
+                             (features["electrode"] == electrode)][0]
+        return colors[idx]
+
+    shank1_top = row(1, 19)
+    shank0_matched = row(0, 19)
+    shank0_top = row(0, 39)
+
+    np.testing.assert_allclose(shank1_top, shank0_matched)
+    assert not np.allclose(shank1_top, shank0_top)
     assert colors.shape[1] == 4
 
 
