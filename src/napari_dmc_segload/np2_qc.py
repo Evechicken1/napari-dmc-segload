@@ -19,6 +19,7 @@ SHANK_PITCH_UM = 250.0               # NP2.0 4-shank inter-shank spacing
 SPACING_TOL_UM = 50.0
 ANGLE_TOL_DEG = 5.0
 MIN_ELECTRODES = 50
+ROOT_FRACTION_WARN = 0.5
 
 
 def shank_metrics(df, coord_cols):
@@ -109,10 +110,17 @@ def build_report(frames, coord_cols):
             warnings.append(
                 f"shank {m['shank']}: only {m['n_electrodes']} electrodes inside the "
                 f"brain (expected >= {MIN_ELECTRODES})")
-        if {r["acronym"] for r in m["ladder"]} <= {"root"}:
+        n_root = int((frames[m["shank"]]["acronym"] == "root").sum())
+        root_fraction = n_root / m["n_electrodes"] if m["n_electrodes"] else 0.0
+        if root_fraction >= 1.0:
             warnings.append(
                 f"shank {m['shank']}: every electrode is in 'root' — the tract may "
                 "lie outside the annotated brain")
+        elif root_fraction > ROOT_FRACTION_WARN:
+            pct = 100.0 * root_fraction
+            warnings.append(
+                f"shank {m['shank']}: {pct:.0f}% of electrodes are in 'root' — the "
+                "probe may extend outside the annotated brain")
 
     for p in pairs:
         off = abs(p["distance_um"] - p["expected_um"])

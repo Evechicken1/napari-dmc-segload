@@ -99,6 +99,31 @@ def test_build_report_warns_when_all_root(np2_frames):
     frames[0] = rooted
     warnings = build_report(frames, COLS)["warnings"]
     assert any("root" in w for w in warnings)
+    root_warnings = [w for w in warnings if "root" in w]
+    assert len(root_warnings) == 1                       # not both all-root and mostly-root
+
+
+def test_build_report_warns_when_mostly_root(np2_frames):
+    frames = dict(np2_frames)
+    mostly_rooted = make_electrode_frame(0).copy()
+    n = len(mostly_rooted)
+    n_root = int(round(n * 0.6))                         # ~60% root, explicit fraction
+    acronyms = mostly_rooted["acronym"].to_numpy(dtype=object).copy()
+    acronyms[:n_root] = "root"
+    mostly_rooted["acronym"] = acronyms
+    frames[0] = mostly_rooted
+    pct = 100.0 * n_root / n
+
+    warnings = build_report(frames, COLS)["warnings"]
+    root_warnings = [w for w in warnings if "root" in w]
+    assert len(root_warnings) == 1
+    assert "shank 0" in root_warnings[0]
+    assert f"{pct:.0f}%" in root_warnings[0]
+
+
+def test_build_report_no_root_warning_for_clean_input(np2_frames):
+    warnings = build_report(np2_frames, COLS)["warnings"]
+    assert not any("root" in w for w in warnings)
 
 
 def test_format_report_is_readable_text(np2_frames):
