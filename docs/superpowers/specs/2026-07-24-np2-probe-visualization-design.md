@@ -169,7 +169,8 @@ format_report(report) -> str
 ```python
 electrode_points(frames, coord_cols) -> (ndarray (N,3), DataFrame features)
 point_colors(features, mode, atlas) -> ndarray (N,4) RGBA
-region_meshes(frames, atlas, min_electrodes=10, max_regions=12) -> list[dict]
+region_meshes(frames, atlas, min_electrodes=10, max_regions=12) -> (list[dict], list[str])
+                                             # (meshes, acronyms with no mesh)
 root_mesh(atlas) -> (vertices, faces)
 ```
 
