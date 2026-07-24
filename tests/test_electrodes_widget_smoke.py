@@ -20,6 +20,14 @@ class _FakeAtlas:
         self.space = _FakeSpace()
 
 
+def _probe_animal(tmp_path):
+    """(base, root) for a fresh animal folder with an empty
+    results/neuropixels_probe tree, ready for _write_tract() calls."""
+    base = tmp_path / "animal01"
+    root = base / "results" / "neuropixels_probe"
+    return base, root
+
+
 def _write_tract(shank_dir, tip, insert, filename="animal01_neuropixels_probe.csv"):
     shank_dir.mkdir(parents=True)
     dtt = np.arange(60) * 20 + 175
@@ -37,16 +45,15 @@ def _write_tract(shank_dir, tip, insert, filename="animal01_neuropixels_probe.cs
 
 
 @pytest.fixture
-def animal_dir(tmp_path):
-    base = tmp_path / "animal01"
-    root = base / "results" / "neuropixels_probe"
+def probe_animal_dir(tmp_path):
+    base, root = _probe_animal(tmp_path)
     _write_tract(root / "neuropixels_probe_0", tip=(60, 120, 40), insert=2000)
     _write_tract(root / "neuropixels_probe_1", tip=(60, 120, 65), insert=2000)  # +25 vox = +250 um
     return base
 
 
-def test_reconstruct_writes_one_csv_per_shank(animal_dir):
-    written = reconstruct_electrodes(animal_dir, _FakeAtlas())
+def test_reconstruct_writes_one_csv_per_shank(probe_animal_dir):
+    written = reconstruct_electrodes(probe_animal_dir, _FakeAtlas())
     assert len(written) == 2
     for out in written:
         assert out.name == "animal01_np2_electrodes.csv"
@@ -77,8 +84,7 @@ def test_reconstruct_missing_results_raises(tmp_path):
 def test_shank_index_comes_from_folder_name_not_position(tmp_path):
     # Only shanks 0 and 2 were traced. Each output must carry its true physical
     # shank number (0 and 2), not the sort positions (0 and 1).
-    base = tmp_path / "animal01"
-    root = base / "results" / "neuropixels_probe"
+    base, root = _probe_animal(tmp_path)
     _write_tract(root / "neuropixels_probe_0", tip=(60, 120, 40), insert=2000)
     _write_tract(root / "neuropixels_probe_2", tip=(60, 120, 90), insert=2000)
     written = reconstruct_electrodes(base, _FakeAtlas())
@@ -91,10 +97,9 @@ def test_shank_index_comes_from_folder_name_not_position(tmp_path):
 def test_electrode_csv_alone_is_never_treated_as_a_tract(tmp_path):
     # Each shank folder contains ONLY a previous run's electrode-output CSV --
     # no tract CSV at all. This must fail with "no tract CSV", independent of
-    # glob ordering: there is nothing else in the folder a buggy glob could
+    # glob order: there is nothing else in the folder a buggy glob could
     # accidentally pick correctly.
-    base = tmp_path / "animal01"
-    root = base / "results" / "neuropixels_probe"
+    base, root = _probe_animal(tmp_path)
     electrode_cols = ["shank", "electrode", "row", "col", "x_um", "z_um",
                        "distance_to_tip_um", "depth_um", "ap_coords",
                        "dv_coords", "ml_coords", "structure_id", "acronym", "name"]
@@ -111,12 +116,12 @@ def test_electrode_csv_alone_is_never_treated_as_a_tract(tmp_path):
 
 def test_rerun_ignores_previous_electrode_output(tmp_path):
     # Name the tract file so that "<animal>_np2_electrodes.csv" (the previous
-    # run's own output, present by the second call) sorts BEFORE it -- the
-    # adversarial ordering the unfiltered `list(sd.glob("*.csv"))` glob would
-    # pick first, so a bug in tract selection cannot hide behind favourable
-    # filesystem ordering.
-    base = tmp_path / "animal01"
-    root = base / "results" / "neuropixels_probe"
+    # run's own output, present by the second call) sorts BEFORE it. The
+    # implementation now selects the tract candidate deterministically via
+    # sorted(), so this ordering is a property of that sort -- not an
+    # accident of filesystem enumeration order -- and the electrode-output
+    # exclusion is what keeps it from being picked regardless.
+    base, root = _probe_animal(tmp_path)
     _write_tract(root / "neuropixels_probe_0", tip=(60, 120, 40), insert=2000,
                  filename="zzz_tract.csv")
     _write_tract(root / "neuropixels_probe_1", tip=(60, 120, 65), insert=2000,

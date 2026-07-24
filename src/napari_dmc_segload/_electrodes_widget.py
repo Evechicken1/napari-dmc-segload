@@ -15,7 +15,7 @@ from magicgui import magicgui
 from magicgui.widgets import FunctionGui
 
 from .np2_layout import shank_electrodes
-from .np2_results import coord_cols, load_atlas, shank_dirs, shank_index
+from .np2_results import ELECTRODE_CSV_SUFFIX, coord_cols, load_atlas, shank_dirs, shank_index
 from .np2_tract import (
     load_tract_csv, recover_line, recover_probe_insert, shank_direction,
     lateral_axis, place_electrodes)
@@ -29,7 +29,9 @@ def reconstruct_electrodes(input_path, atlas):
 
     `atlas` is a BrainGlobeAtlas-like object with `.annotation`, `.structures`,
     and `.space.axes_description`. Raises FileNotFoundError if the dmc results
-    are missing and ValueError if fewer than two shanks were traced.
+    are missing or a shank folder has no tract CSV; ValueError if fewer than
+    two shanks were traced, the atlas axes aren't ap/si/rl-oriented, or a
+    shank folder's name has no parsable index.
     """
     input_path = Path(input_path)
     dirs = shank_dirs(input_path)
@@ -43,7 +45,8 @@ def reconstruct_electrodes(input_path, atlas):
     # sort position, so a missing/untraced shank never re-labels the others.
     fits = []
     for sd in dirs:
-        csvs = [p for p in sd.glob("*.csv") if not p.name.endswith("_np2_electrodes.csv")]
+        csvs = sorted(p for p in sd.glob("*.csv")
+                      if p.is_file() and not p.name.endswith(ELECTRODE_CSV_SUFFIX))
         if not csvs:
             raise FileNotFoundError(f"no tract CSV in {sd}")
         df = load_tract_csv(csvs[0])
@@ -62,7 +65,7 @@ def reconstruct_electrodes(input_path, atlas):
         df = place_electrodes(point, slope, probe_insert, lat, electrodes, cols)
         df = annotate_regions(df, atlas, cols)
         df = df[df["depth_um"] >= INSIDE_BRAIN_DEPTH_UM].reset_index(drop=True)
-        out = sd / f"{animal}_np2_electrodes.csv"
+        out = sd / f"{animal}{ELECTRODE_CSV_SUFFIX}"
         df.to_csv(out, index=False)
         written.append(out)
     return written
