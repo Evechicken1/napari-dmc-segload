@@ -83,6 +83,22 @@ def test_second_visualize_does_not_duplicate_layers(widget, np2_animal_dir):
     assert len(viewer.layers) == n_first
 
 
+def test_second_visualize_preserves_unrelated_user_layers(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    user_data = np.zeros((3, 3))
+    viewer.add_points(user_data, name="my own points")
+    w._visualize()
+    names = [ly.name for ly in viewer.layers]
+    assert names.count("my own points") == 1
+    np.testing.assert_array_equal(viewer.layers["my own points"].data, user_data)
+    assert names.count(ProbeVisWidget.POINTS_LAYER) == 1
+    assert names.count(ProbeVisWidget.ROOT_LAYER) == 1
+    region_names = [n for n in names if n.startswith(ProbeVisWidget.REGION_PREFIX)]
+    assert len(region_names) == len(set(region_names)) and region_names
+
+
 def test_missing_electrode_csvs_aborts_cleanly(widget, tmp_path):
     w, viewer = widget
     base = tmp_path / "animal02"
