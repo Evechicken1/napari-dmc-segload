@@ -1,12 +1,10 @@
-import json
-
 import numpy as np
 import pandas as pd
 import pytest
 
 from napari_dmc_segload.np2_results import (
-    ELECTRODE_CSV_SUFFIX, coord_cols, load_electrode_csvs, probe_results_dir,
-    shank_dirs, shank_index)
+    ELECTRODE_CSV_SUFFIX, coord_cols, load_atlas, load_electrode_csvs,
+    probe_results_dir, shank_dirs, shank_index)
 
 COLS = ["ap_coords", "dv_coords", "ml_coords"]
 
@@ -17,7 +15,14 @@ class _FakeSpace:
 
 class _FakeAtlas:
     space = _FakeSpace()
-    resolution = (10.0, 10.0, 10.0)
+
+
+class _BadSpace:
+    axes_description = ("ap", "ipl", "rl")
+
+
+class _BadAtlas:
+    space = _BadSpace()
 
 
 def _write_electrodes(shank_dir, shank, n=6):
@@ -105,3 +110,57 @@ def test_load_electrode_csvs_missing_column_raises(results_animal):
 
 def test_coord_cols_follows_atlas_axis_order():
     assert coord_cols(_FakeAtlas()) == COLS
+
+
+def test_coord_cols_unsupported_axis_raises():
+    with pytest.raises(ValueError, match="unsupported atlas axis"):
+        coord_cols(_BadAtlas())
+
+
+def test_load_electrode_csvs_duplicate_shank_index_raises(results_animal):
+    # 'neuropixels_probe_1_backup' also parses to shank 1: two folders, one index
+    root = results_animal / "results" / "neuropixels_probe"
+    _write_electrodes(root / "neuropixels_probe_1_backup", shank=1)
+    with pytest.raises(ValueError, match="two probe folders map to shank 1"):
+        load_electrode_csvs(results_animal)
+
+
+def test_load_electrode_csvs_empty_csv_raises(results_animal):
+    d = results_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
+    csv = next(d.glob(f"*{ELECTRODE_CSV_SUFFIX}"))
+    pd.read_csv(csv).iloc[0:0].to_csv(csv, index=False)
+    with pytest.raises(ValueError, match="has no rows"):
+        load_electrode_csvs(results_animal)
+
+
+def test_load_electrode_csvs_multiple_csvs_in_folder_raises(results_animal):
+    d = results_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
+    csv = next(d.glob(f"*{ELECTRODE_CSV_SUFFIX}"))
+    (d / f"oldanimal{ELECTRODE_CSV_SUFFIX}").write_text(csv.read_text())
+    with pytest.raises(ValueError, match="contains 2 electrode CSVs"):
+        load_electrode_csvs(results_animal)
+
+
+def test_load_electrode_csvs_shank_column_mismatch_raises(results_animal):
+    d = results_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
+    csv = next(d.glob(f"*{ELECTRODE_CSV_SUFFIX}"))
+    df = pd.read_csv(csv)
+    df["shank"] = 9
+    df.to_csv(csv, index=False)
+    with pytest.raises(ValueError, match="implies shank 1"):
+        load_electrode_csvs(results_animal)
+
+
+def test_load_atlas_missing_params_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_atlas(tmp_path / "animal01")
+
+
+def test_load_atlas_missing_atlas_info_raises(tmp_path):
+    base = tmp_path / "animal01"
+    base.mkdir()
+    params_fn = base / "params.json"
+    params_fn.write_text('{"foo": "bar"}')
+    with pytest.raises(KeyError) as exc_info:
+        load_atlas(base)
+    assert str(params_fn) in exc_info.value.args[0]
