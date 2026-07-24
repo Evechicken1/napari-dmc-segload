@@ -20,7 +20,7 @@ class _FakeAtlas:
         self.space = _FakeSpace()
 
 
-def _write_tract(shank_dir, tip, insert):
+def _write_tract(shank_dir, tip, insert, filename="animal01_neuropixels_probe.csv"):
     shank_dir.mkdir(parents=True)
     dtt = np.arange(60) * 20 + 175
     # line: dv decreases as we move away from tip; ap/ml constant
@@ -33,7 +33,7 @@ def _write_tract(shank_dir, tip, insert):
         "ap_coords": np.round(ap).astype(int),
         "dv_coords": np.round(dv).astype(int),
         "ml_coords": np.round(ml).astype(int),
-    }).to_csv(shank_dir / "animal01_neuropixels_probe.csv")
+    }).to_csv(shank_dir / filename)
 
 
 @pytest.fixture
@@ -88,9 +88,41 @@ def test_shank_index_comes_from_folder_name_not_position(tmp_path):
     assert shanks["neuropixels_probe_2"] == [2]
 
 
-def test_rerun_ignores_previous_electrode_output(animal_dir):
-    first = reconstruct_electrodes(animal_dir, _FakeAtlas())
-    second = reconstruct_electrodes(animal_dir, _FakeAtlas())
+def test_electrode_csv_alone_is_never_treated_as_a_tract(tmp_path):
+    # Each shank folder contains ONLY a previous run's electrode-output CSV --
+    # no tract CSV at all. This must fail with "no tract CSV", independent of
+    # glob ordering: there is nothing else in the folder a buggy glob could
+    # accidentally pick correctly.
+    base = tmp_path / "animal01"
+    root = base / "results" / "neuropixels_probe"
+    electrode_cols = ["shank", "electrode", "row", "col", "x_um", "z_um",
+                       "distance_to_tip_um", "depth_um", "ap_coords",
+                       "dv_coords", "ml_coords", "structure_id", "acronym", "name"]
+    for i in (0, 1):
+        d = root / f"neuropixels_probe_{i}"
+        d.mkdir(parents=True)
+        pd.DataFrame([[i, 0, 0, 0, 43.0, 0.0, 175.0, 2000.0, 60, 120, 40, 997,
+                        "grey", "grey matter"]],
+                     columns=electrode_cols).to_csv(d / "animal01_np2_electrodes.csv",
+                                                     index=False)
+    with pytest.raises(FileNotFoundError, match="no tract CSV"):
+        reconstruct_electrodes(base, _FakeAtlas())
+
+
+def test_rerun_ignores_previous_electrode_output(tmp_path):
+    # Name the tract file so that "<animal>_np2_electrodes.csv" (the previous
+    # run's own output, present by the second call) sorts BEFORE it -- the
+    # adversarial ordering the unfiltered `list(sd.glob("*.csv"))` glob would
+    # pick first, so a bug in tract selection cannot hide behind favourable
+    # filesystem ordering.
+    base = tmp_path / "animal01"
+    root = base / "results" / "neuropixels_probe"
+    _write_tract(root / "neuropixels_probe_0", tip=(60, 120, 40), insert=2000,
+                 filename="zzz_tract.csv")
+    _write_tract(root / "neuropixels_probe_1", tip=(60, 120, 65), insert=2000,
+                 filename="zzz_tract.csv")
+    first = reconstruct_electrodes(base, _FakeAtlas())
+    second = reconstruct_electrodes(base, _FakeAtlas())
     assert len(second) == len(first) == 2
     for a, b in zip(first, second):
         assert pd.read_csv(a).equals(pd.read_csv(b))
