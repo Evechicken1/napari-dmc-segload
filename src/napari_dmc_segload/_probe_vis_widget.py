@@ -101,17 +101,27 @@ class ProbeVisWidget(QWidget):
 
         cols = coord_cols(atlas)
         points, features = electrode_points(frames, cols)
+
+        # Build everything that can fail from the atlas *before* touching the
+        # viewer, so a bad mesh file (or any other scene-build error) reports
+        # via show_info and leaves the user's existing layers untouched
+        # instead of wiping them and then dying.
+        try:
+            verts, faces = root_mesh(atlas)
+            meshes, skipped = region_meshes(frames, atlas)
+        except Exception as e:
+            show_info(f"Could not build the probe scene: {e}")
+            return
+
         self._atlas = atlas
         self._features = features
 
         self._clear_layers()
 
-        verts, faces = root_mesh(atlas)
         self.viewer.add_surface((verts, faces), name=self.ROOT_LAYER,
                                 colormap=_solid_colormap(ROOT_COLOR),
                                 opacity=ROOT_OPACITY, shading="smooth")
 
-        meshes, skipped = region_meshes(frames, atlas)
         for m in meshes:
             self.viewer.add_surface(
                 (m["vertices"], m["faces"]), name=self.REGION_PREFIX + m["acronym"],
@@ -131,7 +141,11 @@ class ProbeVisWidget(QWidget):
         self.report.setPlainText(text)
 
         out = probe_results_dir(input_path) / f"{input_path.name}_np2_qc.txt"
-        out.write_text(text)
+        try:
+            out.write_text(text)
+        except OSError as e:
+            show_info(f"Visualized {len(frames)} shank(s); could not write QC file: {e}")
+            return
         show_info(f"Visualized {len(frames)} shank(s); QC written to {out.name}")
 
     def _recolour(self, *_):

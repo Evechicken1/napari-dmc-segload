@@ -114,3 +114,52 @@ def test_invalid_path_aborts_cleanly(widget, tmp_path):
     w.form.input_path.value = str(tmp_path / "does_not_exist")
     w._visualize()                       # must not raise
     assert len(viewer.layers) == 0
+
+
+def test_scene_build_failure_reports_and_preserves_prior_layers(
+        widget, np2_animal_dir, monkeypatch):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()                       # first run succeeds, adds layers
+    n_before = len(viewer.layers)
+    names_before = [ly.name for ly in viewer.layers]
+
+    def _boom(atlas):
+        raise RuntimeError("mesh file missing")
+
+    monkeypatch.setattr(pv, "root_mesh", _boom)
+    w._visualize()                       # must not raise
+    assert [ly.name for ly in viewer.layers] == names_before
+    assert len(viewer.layers) == n_before
+
+
+def test_scene_build_failure_on_first_run_leaves_no_partial_layers(
+        widget, np2_animal_dir, monkeypatch):
+    w, viewer = widget
+
+    def _boom(atlas):
+        raise RuntimeError("mesh file missing")
+
+    monkeypatch.setattr(pv, "root_mesh", _boom)
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()                       # must not raise
+    assert len(viewer.layers) == 0
+
+
+def test_qc_write_failure_still_adds_scene_and_fills_panel(
+        widget, np2_animal_dir, monkeypatch):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+
+    from pathlib import Path
+
+    def _boom(self, text):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "write_text", _boom)
+    w._visualize()                       # must not raise
+
+    names = [ly.name for ly in viewer.layers]
+    assert ProbeVisWidget.POINTS_LAYER in names
+    assert ProbeVisWidget.ROOT_LAYER in names
+    assert "shank 0" in w.report.toPlainText()
