@@ -79,3 +79,36 @@ def test_point_colors_rejects_unknown_mode(np2_frames):
     _, features = electrode_points(np2_frames, COLS)
     with pytest.raises(ValueError, match="colour mode"):
         point_colors(features, "banana", None)
+
+
+from napari_dmc_segload.np2_scene import region_meshes, root_mesh
+
+
+def test_root_mesh_returns_vertices_and_faces():
+    verts, faces = root_mesh(_FakeAtlas())
+    assert verts.ndim == 2 and verts.shape[1] == 3
+    assert faces.ndim == 2 and faces.shape[1] == 3
+
+
+def test_region_meshes_skips_structures_without_a_mesh(np2_frames):
+    meshes, skipped = region_meshes(np2_frames, _FakeAtlas())
+    assert [m["acronym"] for m in meshes] == ["ORBl"]     # MOs is meshless in the fake
+    assert skipped == ["MOs"]
+    assert meshes[0]["vertices"].shape[1] == 3
+    assert meshes[0]["faces"].shape[1] == 3
+    np.testing.assert_allclose(meshes[0]["color"][:3],
+                               [36 / 255, 138 / 255, 94 / 255], atol=1e-6)
+
+
+def test_region_meshes_ignores_root_and_rare_structures():
+    df = make_electrode_frame(0).copy()
+    df.loc[df.index[:4], "acronym"] = "ORBm"             # 4 electrodes only
+    df.loc[df.index[4:], "acronym"] = "root"
+    meshes, skipped = region_meshes({0: df}, _FakeAtlas(), min_electrodes=10)
+    assert meshes == []                                  # ORBm too rare, root excluded
+    assert skipped == []
+
+
+def test_region_meshes_caps_the_number_of_regions(np2_frames):
+    meshes, _ = region_meshes(np2_frames, _FakeAtlas(), min_electrodes=1, max_regions=1)
+    assert len(meshes) == 1

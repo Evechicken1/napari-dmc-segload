@@ -86,3 +86,61 @@ def _index_ramp(t):
     x = np.linspace(0.0, 1.0, len(_INDEX_CMAP_STOPS))
     rgb = np.stack([np.interp(t, x, _INDEX_CMAP_STOPS[:, k]) for k in range(3)], axis=1)
     return np.concatenate([rgb, np.ones((len(t), 1))], axis=1)
+
+
+MIN_MESH_ELECTRODES = 10     # ignore structures a shank merely clips
+MAX_MESH_REGIONS = 12        # keep the scene readable
+ROOT_OPACITY = 0.08
+REGION_OPACITY = 0.25
+ROOT_COLOR = np.array([0.6, 0.6, 0.6, 1.0])
+
+
+def root_mesh(atlas):
+    """(vertices, faces) of the whole-brain outline, in um."""
+    return _mesh_arrays(atlas.mesh_from_structure("root"))
+
+
+def region_meshes(frames, atlas, min_electrodes=MIN_MESH_ELECTRODES,
+                  max_regions=MAX_MESH_REGIONS):
+    """Meshes for the structures the electrodes actually pass through.
+
+    Structures holding fewer than `min_electrodes` electrodes are ignored, as is
+    'root' (drawn separately). The rest are taken in descending electrode count
+    up to `max_regions`. Returns (meshes, skipped) where each mesh is
+    {acronym, vertices, faces, color} and `skipped` lists the acronyms that
+    qualified but have no mesh in this atlas.
+    """
+    counts = {}
+    for df in frames.values():
+        for acronym, n in df["acronym"].astype(str).value_counts().items():
+            counts[acronym] = counts.get(acronym, 0) + int(n)
+    counts.pop("root", None)
+
+    wanted = sorted((a for a, n in counts.items() if n >= min_electrodes),
+                    key=lambda a: (-counts[a], a))[:max_regions]
+
+    meshes, skipped = [], []
+    for acronym in wanted:
+        try:
+            verts, faces = _mesh_arrays(atlas.mesh_from_structure(acronym))
+        except Exception:            # atlas has no mesh file for this structure
+            skipped.append(acronym)
+            continue
+        meshes.append({"acronym": acronym, "vertices": verts, "faces": faces,
+                       "color": _structure_color(atlas, acronym)})
+    return meshes, skipped
+
+
+def _mesh_arrays(mesh):
+    """(vertices, faces) as plain arrays from a meshio-style mesh."""
+    return (np.asarray(mesh.points, dtype=float),
+            np.asarray(mesh.cells[0].data, dtype=int))
+
+
+def _structure_color(atlas, acronym):
+    """RGBA for a structure from the atlas palette, grey if unknown."""
+    try:
+        rgb = atlas.structures[acronym]["rgb_triplet"]
+    except (KeyError, TypeError):
+        return UNKNOWN_REGION_COLOR.copy()
+    return np.array([rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0, 1.0])
