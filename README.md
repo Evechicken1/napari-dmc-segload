@@ -103,3 +103,17 @@ and the angle between them. Anything outside tolerance is listed under
 
 This widget only reads the electrode CSVs — it never recomputes the
 reconstruction.
+
+Two more controls become available once a probe has been visualized:
+
+- **add region** — a searchable dropdown listing every acronym in the atlas
+  (type to filter). Click **Add region** to overlay that structure's mesh as
+  a highlighted `np2 ROI: <acronym>` layer, so a target nucleus (e.g. `LDT`)
+  shows up even when the probe misses it entirely. Layers accumulate across
+  multiple adds; a fresh **Visualize probe** clears them. An unknown or
+  mesh-less acronym reports a message instead of adding a layer.
+- **limit depth** / **max depth (um)** — when the checkbox is enabled,
+  electrodes deeper than the given value are hidden from `np2 electrodes`,
+  updating live as you type (same as switching **colour by**). This is
+  display-only: the region meshes and the QC report always reflect the full
+  reconstruction, unaffected by the filter.
