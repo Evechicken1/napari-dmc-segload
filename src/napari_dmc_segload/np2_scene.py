@@ -56,6 +56,28 @@ def electrode_points(frames, coord_cols, max_depth=None):
     return pts, pd.concat(feats, ignore_index=True)
 
 
+def tract_points(frames, coord_cols):
+    """Stack every shank's registered tract samples into one point array.
+
+    `frames` is {shank: tract_df}. Tract CSVs carry no shank column, so the
+    shank id comes from the dict key, broadcast across that shank's rows.
+    Shanks are concatenated in ascending index order. Returns (points (N,3)
+    float voxel coords, features DataFrame with a single 'shank' column) so the
+    result can be coloured through the shared `point_colors(.., MODE_SHANK, ..)`.
+    Empty frames give (0,3) points and an empty 'shank' column.
+    """
+    points, feats = [], []
+    for shank in sorted(frames):
+        df = frames[shank]
+        pts = df[coord_cols].to_numpy(dtype=float)
+        points.append(pts)
+        feats.append(pd.DataFrame({"shank": np.full(len(pts), shank, dtype=int)}))
+    stacked = np.concatenate(points, axis=0) if points else np.zeros((0, 3))
+    features = (pd.concat(feats, ignore_index=True) if feats
+               else pd.DataFrame({"shank": np.zeros(0, dtype=int)}))
+    return stacked, features
+
+
 def point_colors(features, mode, atlas):
     """RGBA (N,4) for each electrode under the given colour mode.
 

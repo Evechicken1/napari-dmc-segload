@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import pandas as pd
 import cv2
 import pytest
 
@@ -27,7 +28,7 @@ def animal_dir(tmp_path):
 
 
 from napari_dmc_segload.np2_layout import shank_electrodes
-from napari_dmc_segload.np2_results import ELECTRODE_CSV_SUFFIX
+from napari_dmc_segload.np2_results import ELECTRODE_CSV_SUFFIX, TRACT_CSV_SUFFIX
 from napari_dmc_segload.np2_tract import place_electrodes
 
 NP2_COORD_COLS = ["ap_coords", "dv_coords", "ml_coords"]
@@ -60,6 +61,26 @@ def make_electrode_frame(shank, n_rows=100, tip=None, slope=None,
     return df
 
 
+def make_tract_frame(shank, n_rows=50, tip=None, slope=None, insert=NP2_INSERT_UM):
+    """One shank's registered tract DataFrame, shaped like dmc's Results CSV
+    (parenthesised distance/depth columns, integer atlas coords, no shank
+    column). Samples the same line as make_electrode_frame."""
+    tip = NP2_TIP0 + np.array([0.0, 0.0, NP2_SHANK_PITCH_VOX * shank]) if tip is None \
+        else np.asarray(tip, float)
+    slope = NP2_SLOPE if slope is None else np.asarray(slope, float)
+    dtt = np.linspace(175.0, 3825.0, n_rows)
+    coords = tip[None, :] + np.outer(dtt, slope)         # coord = tip + slope*dtt
+    depth = insert - dtt
+    return pd.DataFrame({
+        "distance_to_tip(um)": dtt,
+        "depth(um)": depth,
+        "ap_coords": np.round(coords[:, 0]).astype(int),
+        "dv_coords": np.round(coords[:, 1]).astype(int),
+        "ml_coords": np.round(coords[:, 2]).astype(int),
+        "acronym": [_np2_acronym(d) for d in depth],
+    })
+
+
 @pytest.fixture
 def np2_frames():
     """Four well-formed shanks, 250 um apart, parallel, 200 electrodes each."""
@@ -67,14 +88,22 @@ def np2_frames():
 
 
 @pytest.fixture
+def np2_tract_frames():
+    """Registered tract for each of the four shanks (50 samples each)."""
+    return {i: make_tract_frame(i) for i in range(4)}
+
+
+@pytest.fixture
 def np2_animal_dir(tmp_path, np2_frames):
-    """Animal folder holding those four shanks' electrode CSVs + params.json."""
+    """Animal folder holding those four shanks' electrode + tract CSVs and
+    params.json — the on-disk shape the probe-vis widget reads."""
     base = tmp_path / "animal01"
     root = base / "results" / "neuropixels_probe"
     for shank, df in np2_frames.items():
         sd = root / f"neuropixels_probe_{shank}"
         sd.mkdir(parents=True)
         df.to_csv(sd / f"animal01{ELECTRODE_CSV_SUFFIX}", index=False)
+        make_tract_frame(shank).to_csv(sd / f"animal01{TRACT_CSV_SUFFIX}", index=False)
     (base / "params.json").write_text(
         json.dumps({"atlas_info": {"atlas": "allen_mouse_10um"}}))
     return base

@@ -16,6 +16,13 @@ from natsort import natsorted
 
 PROBE_RESULTS_SUBDIR = ("results", "neuropixels_probe")
 ELECTRODE_CSV_SUFFIX = "_np2_electrodes.csv"
+TRACT_CSV_SUFFIX = "_neuropixels_probe.csv"
+
+# Columns a registered tract CSV must carry to be plottable. The atlas-coord
+# column *names* (ap/dv/ml_coords) are fixed; only their order depends on the
+# atlas (see coord_cols). Unlike the electrode CSV a tract CSV has no 'shank'
+# column — the shank index comes from the folder name.
+REQUIRED_TRACT_COLS = ("ap_coords", "dv_coords", "ml_coords")
 
 # dmc names atlas-coord columns from the atlas axis order via this map.
 AXIS_TO_COORD_COL = {"ap": "ap_coords", "si": "dv_coords", "rl": "ml_coords"}
@@ -101,6 +108,50 @@ def load_electrode_csvs(input_path):
         raise FileNotFoundError(
             f"no '*{ELECTRODE_CSV_SUFFIX}' under {probe_results_dir(input_path)}; "
             "run the 'NP2.0 electrodes' widget first")
+    return frames
+
+
+def load_tract_csvs(input_path):
+    """Load each shank folder's single `*_neuropixels_probe.csv` (the registered
+    tract dmc fit the electrode line to).
+
+    Returns {shank_index: DataFrame}, keyed by the index parsed from the folder
+    name. The tract CSV carries no 'shank' column (unlike the electrode CSV), so
+    no column/folder cross-check is possible. Raises FileNotFoundError if no
+    tract CSV exists anywhere, and ValueError if: a folder holds more than one
+    candidate CSV, a CSV is zero-byte, a CSV is missing a required coord column
+    or has no rows, or two folders map to the same shank index.
+    """
+    frames = {}
+    seen = {}
+    for sd in shank_dirs(input_path):
+        csvs = sorted(p for p in sd.glob(f"*{TRACT_CSV_SUFFIX}") if p.is_file())
+        if not csvs:
+            continue
+        if len(csvs) > 1:
+            raise ValueError(
+                f"{sd} contains {len(csvs)} tract CSVs "
+                f"({', '.join(c.name for c in csvs)}); keep only the current animal's")
+        csv = csvs[0]
+        try:
+            df = pd.read_csv(csv)
+        except pd.errors.EmptyDataError:
+            raise ValueError(f"{csv} is empty; re-run dmc Results for this probe") from None
+        missing = [c for c in REQUIRED_TRACT_COLS if c not in df.columns]
+        if missing:
+            raise ValueError(f"{csv} is missing column(s): {', '.join(missing)}")
+        if df.empty:
+            raise ValueError(f"{csv} has no rows; re-run dmc Results for this probe")
+        idx = shank_index(sd.name)
+        if idx in seen:
+            raise ValueError(
+                f"two probe folders map to shank {idx}: {seen[idx].name} and {sd.name}")
+        seen[idx] = sd
+        frames[idx] = df
+    if not frames:
+        raise FileNotFoundError(
+            f"no '*{TRACT_CSV_SUFFIX}' under {probe_results_dir(input_path)}; "
+            "run dmc Results first")
     return frames
 
 

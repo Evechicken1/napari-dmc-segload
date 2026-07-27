@@ -5,8 +5,9 @@ import pandas as pd
 import pytest
 
 from napari_dmc_segload.np2_results import (
-    ELECTRODE_CSV_SUFFIX, coord_cols, load_atlas, load_electrode_csvs,
-    probe_results_dir, shank_dirs, shank_index)
+    ELECTRODE_CSV_SUFFIX, TRACT_CSV_SUFFIX, coord_cols, load_atlas,
+    load_electrode_csvs, load_tract_csvs, probe_results_dir, shank_dirs,
+    shank_index)
 
 COLS = ["ap_coords", "dv_coords", "ml_coords"]
 
@@ -166,6 +167,85 @@ def test_load_electrode_csvs_shank_column_mismatch_raises(results_animal):
     df.to_csv(csv, index=False)
     with pytest.raises(ValueError, match="implies shank 1"):
         load_electrode_csvs(results_animal)
+
+
+def _write_tract(shank_dir, shank, n=8):
+    """Minimal well-formed registered tract CSV (no 'shank' column)."""
+    shank_dir.mkdir(parents=True, exist_ok=True)
+    dtt = np.arange(n) * 20 + 175.0
+    df = pd.DataFrame({
+        "distance_to_tip(um)": dtt,
+        "depth(um)": 4000.0 - dtt,
+        "ap_coords": np.full(n, 600),
+        "dv_coords": np.arange(n) + 400,
+        "ml_coords": np.full(n, 500 + shank * 25),
+        "acronym": ["ORBl"] * n,
+    })
+    df.to_csv(shank_dir / f"animal01{TRACT_CSV_SUFFIX}", index=False)
+
+
+@pytest.fixture
+def tract_animal(tmp_path):
+    base = tmp_path / "animal01"
+    root = base / "results" / "neuropixels_probe"
+    for i in (0, 1, 2, 3):
+        _write_tract(root / f"neuropixels_probe_{i}", shank=i)
+    return base
+
+
+def test_load_tract_csvs_keyed_by_folder_index(tract_animal):
+    frames = load_tract_csvs(tract_animal)
+    assert sorted(frames) == [0, 1, 2, 3]
+    assert all(isinstance(df, pd.DataFrame) for df in frames.values())
+    assert "shank" not in frames[0].columns          # tract CSV carries no shank col
+    assert "distance_to_tip(um)" in frames[0].columns
+
+
+def test_load_tract_csvs_uses_folder_index_not_sort_position(tmp_path):
+    base = tmp_path / "animal01"
+    root = base / "results" / "neuropixels_probe"
+    _write_tract(root / "neuropixels_probe_0", shank=0)
+    _write_tract(root / "neuropixels_probe_2", shank=2)
+    assert sorted(load_tract_csvs(base)) == [0, 2]
+
+
+def test_load_tract_csvs_ignores_electrode_csv(tract_animal):
+    # an electrode CSV in the same folder must never be picked up as a tract
+    d = tract_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
+    _write_electrodes(d, shank=1)
+    frames = load_tract_csvs(tract_animal)
+    assert "distance_to_tip(um)" in frames[1].columns    # the tract, not electrodes
+    assert "electrode" not in frames[1].columns
+
+
+def test_load_tract_csvs_no_files_raises(tmp_path):
+    base = tmp_path / "animal01"
+    (base / "results" / "neuropixels_probe" / "neuropixels_probe_0").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="run dmc Results"):
+        load_tract_csvs(base)
+
+
+def test_load_tract_csvs_missing_coord_column_raises(tract_animal):
+    d = tract_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
+    csv = next(d.glob(f"*{TRACT_CSV_SUFFIX}"))
+    pd.read_csv(csv).drop(columns=["ml_coords"]).to_csv(csv, index=False)
+    with pytest.raises(ValueError, match="ml_coords"):
+        load_tract_csvs(tract_animal)
+
+
+def test_load_tract_csvs_empty_csv_raises(tract_animal):
+    d = tract_animal / "results" / "neuropixels_probe" / "neuropixels_probe_1"
+    csv = next(d.glob(f"*{TRACT_CSV_SUFFIX}"))
+    pd.read_csv(csv).iloc[0:0].to_csv(csv, index=False)
+    with pytest.raises(ValueError, match="no rows"):
+        load_tract_csvs(tract_animal)
+
+
+def test_load_tract_csvs_duplicate_shank_index_raises(tract_animal):
+    root = tract_animal / "results" / "neuropixels_probe"
+    _write_tract(root / "neuropixels_probe_1_backup", shank=1)
+    with pytest.raises(ValueError, match="two probe folders map to shank 1"):
+        load_tract_csvs(tract_animal)
 
 
 def test_load_atlas_missing_params_raises(tmp_path):
