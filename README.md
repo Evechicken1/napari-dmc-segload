@@ -117,3 +117,15 @@ Two more controls become available once a probe has been visualized:
   updating live as you type (same as switching **colour by**). This is
   display-only: the region meshes and the QC report always reflect the full
   reconstruction, unaffected by the filter.
+- **seg points (regi channel)** — pick a registration channel to overlay the
+  raw manually-clicked segmentation points (from
+  `segmentation/neuropixels_probe/`) as a `np2 segmentation points` layer,
+  registered into the atlas and coloured by shank. These are the actual clicks
+  the reconstruction was built from, so overlaying them against the fitted
+  `np2 electrodes` shows how well the fit tracks them. The dropdown lists the
+  `sharpy_track` channels that carry a `registration.json`; it starts at
+  `(none)` so nothing renders until you choose, and choosing `(none)` again
+  removes the layer. Like the region meshes, it is unaffected by the depth
+  filter. Requires `napari-dmc-brainmap` (for the registration transform);
+  without it, or if registration is incomplete, a message is shown and the
+  rest of the scene is untouched.

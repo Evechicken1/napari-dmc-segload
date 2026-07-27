@@ -263,50 +263,75 @@ def test_depth_filter_empty_then_restored_repopulates_colour(widget, np2_animal_
         colors, point_colors(layer.features, w.form.colour_by.value, w._atlas))
 
 
-def test_visualize_adds_tract_layer_coloured_by_shank(widget, np2_animal_dir):
-    w, viewer = widget
-    w.form.input_path.value = str(np2_animal_dir)
-    w._visualize()
-    assert ProbeVisWidget.TRACT_LAYER in [ly.name for ly in viewer.layers]
-    tr = viewer.layers[ProbeVisWidget.TRACT_LAYER]
-    assert len(tr.data) == 200                       # 4 shanks x 50 samples
-    np.testing.assert_allclose(tr.scale, [10.0, 10.0, 10.0])
-    np.testing.assert_allclose(
-        np.array(tr.face_color), point_colors(tr.features, MODE_SHANK, None))
+def _fake_clicks(*_):
+    return {0: np.array([[900, 300, 560], [901, 310, 561]], dtype=float),
+            1: np.array([[905, 320, 540]], dtype=float)}
 
 
-def test_depth_filter_leaves_tract_layer_untouched(widget, np2_animal_dir):
+def test_visualize_populates_seg_dropdown_default_none(widget, np2_animal_dir, monkeypatch):
     w, viewer = widget
+    monkeypatch.setattr(pv, "registration_channels", lambda p: ["dapi", "green"])
     w.form.input_path.value = str(np2_animal_dir)
     w._visualize()
-    tract_n = len(viewer.layers[ProbeVisWidget.TRACT_LAYER].data)
-    elec_full = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
+    choices = list(w.form.seg_regi_channel.choices)
+    assert choices[0] == pv.NONE_CHANNEL and "dapi" in choices and "green" in choices
+    assert w.form.seg_regi_channel.value == pv.NONE_CHANNEL
+    assert ProbeVisWidget.SEGPOINTS_LAYER not in [ly.name for ly in viewer.layers]
+
+
+def test_select_channel_adds_segpoints_coloured_by_shank(widget, np2_animal_dir, monkeypatch):
+    w, viewer = widget
+    monkeypatch.setattr(pv, "registration_channels", lambda p: ["dapi"])
+    monkeypatch.setattr(pv, "register_probe_clicks", _fake_clicks)
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.seg_regi_channel.value = "dapi"
+    assert ProbeVisWidget.SEGPOINTS_LAYER in [ly.name for ly in viewer.layers]
+    sp = viewer.layers[ProbeVisWidget.SEGPOINTS_LAYER]
+    assert len(sp.data) == 3
+    np.testing.assert_allclose(sp.scale, [10.0, 10.0, 10.0])
+    np.testing.assert_allclose(np.array(sp.face_color),
+                               point_colors(sp.features, MODE_SHANK, None))
+
+
+def test_deselect_channel_removes_segpoints(widget, np2_animal_dir, monkeypatch):
+    w, viewer = widget
+    monkeypatch.setattr(pv, "registration_channels", lambda p: ["dapi"])
+    monkeypatch.setattr(pv, "register_probe_clicks", _fake_clicks)
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.seg_regi_channel.value = "dapi"
+    assert ProbeVisWidget.SEGPOINTS_LAYER in [ly.name for ly in viewer.layers]
+    w.form.seg_regi_channel.value = pv.NONE_CHANNEL
+    assert ProbeVisWidget.SEGPOINTS_LAYER not in [ly.name for ly in viewer.layers]
+
+
+def test_depth_filter_leaves_segpoints_untouched(widget, np2_animal_dir, monkeypatch):
+    w, viewer = widget
+    monkeypatch.setattr(pv, "registration_channels", lambda p: ["dapi"])
+    monkeypatch.setattr(pv, "register_probe_clicks", _fake_clicks)
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.seg_regi_channel.value = "dapi"
+    n = len(viewer.layers[ProbeVisWidget.SEGPOINTS_LAYER].data)
     w.form.limit_depth.value = True
     w.form.max_depth_um.value = 3000.0
-    assert len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data) < elec_full   # filtered
-    assert len(viewer.layers[ProbeVisWidget.TRACT_LAYER].data) == tract_n     # unchanged
+    assert len(viewer.layers[ProbeVisWidget.SEGPOINTS_LAYER].data) == n
 
 
-def test_second_visualize_does_not_duplicate_tract_layer(widget, np2_animal_dir):
+def test_register_failure_reports_and_keeps_scene(widget, np2_animal_dir, monkeypatch):
     w, viewer = widget
+    monkeypatch.setattr(pv, "registration_channels", lambda p: ["dapi"])
+
+    def _boom(*_):
+        raise RuntimeError("dmc not installed")
+
+    monkeypatch.setattr(pv, "register_probe_clicks", _boom)
     w.form.input_path.value = str(np2_animal_dir)
     w._visualize()
-    w._visualize()
-    names = [ly.name for ly in viewer.layers]
-    assert names.count(ProbeVisWidget.TRACT_LAYER) == 1
-
-
-def test_visualize_without_tract_csvs_still_builds_scene(widget, np2_animal_dir):
-    w, viewer = widget
-    root = np2_animal_dir / "results" / "neuropixels_probe"
-    for c in root.glob("*/*_neuropixels_probe.csv"):
-        c.unlink()
-    w.form.input_path.value = str(np2_animal_dir)
-    w._visualize()                                   # must not raise
-    names = [ly.name for ly in viewer.layers]
-    assert ProbeVisWidget.POINTS_LAYER in names
-    assert ProbeVisWidget.TRACT_LAYER not in names
-    assert "no tract overlay" in w.report.toPlainText()
+    w.form.seg_regi_channel.value = "dapi"                 # must not raise
+    assert ProbeVisWidget.SEGPOINTS_LAYER not in [ly.name for ly in viewer.layers]
+    assert ProbeVisWidget.POINTS_LAYER in [ly.name for ly in viewer.layers]
 
 
 def test_colour_switch_still_works_with_depth_active(widget, np2_animal_dir):
