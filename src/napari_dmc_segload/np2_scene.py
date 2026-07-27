@@ -31,24 +31,29 @@ _INDEX_CMAP_STOPS = np.array([
 ])
 
 
-def electrode_points(frames, coord_cols):
+def electrode_points(frames, coord_cols, max_depth=None):
     """Stack every shank's electrodes into one point array + feature table.
 
     Shanks are concatenated in ascending index order, rows in file order.
     Returns (points (N,3) float voxel coords, features DataFrame with columns
     shank, acronym, electrode).
+
+    If `max_depth` is not None, electrodes with depth_um greater than it are
+    dropped (display filter); the tip stays, the shallow end is trimmed.
     """
     points, feats = [], []
     for shank in sorted(frames):
         df = frames[shank]
+        if max_depth is not None:
+            df = df[df["depth_um"] <= max_depth]
         points.append(df[coord_cols].to_numpy(dtype=float))
         feats.append(pd.DataFrame({
             "shank": df["shank"].to_numpy(dtype=int),
             "acronym": df["acronym"].astype(str).to_numpy(),
             "electrode": df["electrode"].to_numpy(dtype=int),
         }))
-    return (np.concatenate(points, axis=0),
-            pd.concat(feats, ignore_index=True))
+    pts = np.concatenate(points, axis=0) if points else np.zeros((0, 3))
+    return pts, pd.concat(feats, ignore_index=True)
 
 
 def point_colors(features, mode, atlas):
@@ -56,6 +61,9 @@ def point_colors(features, mode, atlas):
 
     `atlas` is only used by MODE_REGION and may be None otherwise.
     """
+    if len(features) == 0:
+        return np.zeros((0, 4))
+
     if mode == MODE_SHANK:
         # % len(SHANK_COLORS) assumes a single 4-shank NP2.0 probe (shank
         # indices 0-3); a second probe traced into the same tree (indices 4+)
@@ -95,6 +103,7 @@ MIN_MESH_ELECTRODES = 10     # ignore structures a shank merely clips
 MAX_MESH_REGIONS = 12        # keep the scene readable
 ROOT_OPACITY = 0.08
 REGION_OPACITY = 0.25
+ROI_OPACITY = 0.5
 ROOT_COLOR = np.array([0.6, 0.6, 0.6, 1.0])
 
 
@@ -147,3 +156,20 @@ def _structure_color(atlas, acronym):
     except (KeyError, TypeError):
         return UNKNOWN_REGION_COLOR.copy()
     return np.array([rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0, 1.0])
+
+
+def atlas_acronyms(atlas):
+    """Sorted list of every structure acronym in the atlas."""
+    return sorted({d["acronym"] for d in atlas.structures.values()})
+
+
+def roi_mesh(atlas, acronym):
+    """Mesh dict {acronym, vertices, faces, color} for one structure, drawn as
+    a highlighted region-of-interest. Raises ValueError if the atlas has no mesh
+    for `acronym` (unknown structure or missing mesh file)."""
+    try:
+        verts, faces = _mesh_arrays(atlas.mesh_from_structure(acronym))
+    except Exception:
+        raise ValueError(f"no mesh available for '{acronym}' in this atlas")
+    return {"acronym": acronym, "vertices": verts, "faces": faces,
+            "color": _structure_color(atlas, acronym)}
