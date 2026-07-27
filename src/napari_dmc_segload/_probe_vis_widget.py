@@ -18,14 +18,16 @@ from qtpy.QtWidgets import QCompleter, QWidget, QVBoxLayout, QPushButton, QTextE
 
 from .np2_qc import build_report, format_report
 from .np2_results import (
-    coord_cols, load_atlas, load_electrode_csvs, load_tract_csvs, probe_results_dir)
+    coord_cols, load_atlas, load_electrode_csvs, probe_results_dir)
 from .np2_scene import (
     COLOUR_MODES, MODE_SHANK, REGION_OPACITY, ROI_OPACITY, ROOT_COLOR, ROOT_OPACITY,
     atlas_acronyms, electrode_points, point_colors, region_meshes, roi_mesh,
-    root_mesh, tract_points)
+    root_mesh)
+from .np2_segpoints import (
+    NONE_CHANNEL, register_probe_clicks, registration_channels, stack_shank_points)
 
 POINT_SIZE_VOX = 2.0        # 2 voxels = 20 um across, visible without hiding anatomy
-TRACT_POINT_SIZE_VOX = 3.0  # slightly larger hollow rings; electrode discs read inside
+SEGPOINT_SIZE_VOX = 5.0     # sparse clicks: larger diamonds, distinct from electrodes
 
 
 def _build_form() -> FunctionGui:
@@ -36,12 +38,15 @@ def _build_form() -> FunctionGui:
         colour_by=dict(widget_type="ComboBox", label="colour by",
                        choices=list(COLOUR_MODES), value=COLOUR_MODES[0]),
         add_region=dict(widget_type="ComboBox", label="add region", choices=[]),
+        seg_regi_channel=dict(widget_type="ComboBox", label="seg points (regi channel)",
+                              choices=[NONE_CHANNEL], value=NONE_CHANNEL),
         limit_depth=dict(widget_type="CheckBox", label="limit depth", value=False),
         max_depth_um=dict(widget_type="FloatSpinBox", label="max depth (um)",
                           value=2000.0, min=-1.0, max=15000.0, step=50.0),
         call_button=False,
     )
-    def form(input_path, colour_by, add_region, limit_depth, max_depth_um):
+    def form(input_path, colour_by, add_region, seg_regi_channel,
+             limit_depth, max_depth_um):
         pass
     return form
 
@@ -56,7 +61,7 @@ class ProbeVisWidget(QWidget):
     """Dock widget: 3D view + QC of a reconstructed NP2.0 probe."""
 
     POINTS_LAYER = "np2 electrodes"
-    TRACT_LAYER = "np2 tract points"
+    SEGPOINTS_LAYER = "np2 segmentation points"
     ROOT_LAYER = "np2 root"
     REGION_PREFIX = "np2 region: "
     ROI_PREFIX = "np2 ROI: "
@@ -95,18 +100,19 @@ class ProbeVisWidget(QWidget):
         # loaded state, so recolouring/re-filtering never re-reads the CSVs
         self._atlas = None
         self._frames = None
-        self._tract_frames = None
         self._cols = None
+        self._input_path = None      # kept so seg-point channel switches can reload
 
         self.form.colour_by.changed.connect(self._render_points)
         self.form.limit_depth.changed.connect(self._render_points)
         self.form.max_depth_um.changed.connect(self._render_points)
+        self.form.seg_regi_channel.changed.connect(self._render_segpoints)
 
     # --- helpers -----------------------------------------------------------
     def _clear_layers(self):
         """Remove only the layers this widget added."""
         for layer in list(self.viewer.layers):
-            if (layer.name in (self.POINTS_LAYER, self.TRACT_LAYER, self.ROOT_LAYER)
+            if (layer.name in (self.POINTS_LAYER, self.SEGPOINTS_LAYER, self.ROOT_LAYER)
                     or layer.name.startswith(self.REGION_PREFIX)
                     or layer.name.startswith(self.ROI_PREFIX)):
                 self.viewer.layers.remove(layer)
@@ -127,15 +133,6 @@ class ProbeVisWidget(QWidget):
 
         cols = coord_cols(atlas)
 
-        # The registered tract overlay is optional: a missing/broken tract must
-        # never abort the electrode scene, only skip its own layer with a note.
-        try:
-            tract_frames = load_tract_csvs(input_path)
-            tract_note = ""
-        except (FileNotFoundError, ValueError) as e:
-            tract_frames = None
-            tract_note = f"note: no tract overlay ({e})\n"
-
         # Build everything that can fail from the atlas *before* touching the
         # viewer, so a bad mesh file (or any other scene-build error) reports
         # via show_info and leaves the user's existing layers untouched
@@ -149,8 +146,8 @@ class ProbeVisWidget(QWidget):
 
         self._atlas = atlas
         self._frames = frames
-        self._tract_frames = tract_frames
         self._cols = cols
+        self._input_path = input_path
 
         self._clear_layers()
 
@@ -166,14 +163,17 @@ class ProbeVisWidget(QWidget):
 
         self.form.add_region.choices = atlas_acronyms(atlas)
 
+        # Repopulate the seg-point channel dropdown and reset it to (none) so the
+        # clicks overlay only appears once the user actively picks a channel.
+        self.form.seg_regi_channel.choices = [NONE_CHANNEL] + registration_channels(input_path)
+        self.form.seg_regi_channel.value = NONE_CHANNEL
+
         self._render_points()
-        self._render_tract()
 
         text = format_report(build_report(frames, cols),
                              title=f"NP2.0 probe QC — {input_path.name}")
         if skipped:
             text += "note: this atlas has no mesh for: " + ", ".join(skipped) + "\n"
-        text += tract_note
         self.report.setPlainText(text)
 
         out = probe_results_dir(input_path) / f"{input_path.name}_np2_qc.txt"
@@ -209,18 +209,32 @@ class ProbeVisWidget(QWidget):
                 face_color=colors)
             self.viewer.dims.ndisplay = 3
 
-    def _render_tract(self):
-        """Add the registered tract samples as a static overlay, coloured by
-        shank. Built once per _visualize — the depth filter and colour mode
-        deliberately never touch it, so it stays a full-length reference."""
-        if not self._tract_frames:
+    def _render_segpoints(self, *_):
+        """Show the raw registered segmentation clicks for the selected
+        registration channel, coloured by shank. Static overlay — the depth
+        filter and electrode colour mode deliberately never touch it. Selecting
+        '(none)' removes it. Any registration/transform failure is reported and
+        leaves the rest of the scene intact."""
+        if self.SEGPOINTS_LAYER in self.viewer.layers:
+            self.viewer.layers.remove(self.viewer.layers[self.SEGPOINTS_LAYER])
+        chan = self.form.seg_regi_channel.value
+        if self._input_path is None or chan == NONE_CHANNEL:
             return
-        points, features = tract_points(self._tract_frames, self._cols)
+        try:
+            by_shank = register_probe_clicks(self._input_path, chan, self._atlas)
+        except Exception as e:
+            show_info(f"Could not register segmentation points: {e}")
+            return
+        points, features = stack_shank_points(by_shank)
+        if len(points) == 0:
+            show_info(f"No segmentation clicks registered via '{chan}'.")
+            return
         colors = point_colors(features, MODE_SHANK, None)
         self.viewer.add_points(
-            points, name=self.TRACT_LAYER, size=TRACT_POINT_SIZE_VOX,
-            symbol="ring", scale=tuple(self._atlas.resolution),
+            points, name=self.SEGPOINTS_LAYER, size=SEGPOINT_SIZE_VOX,
+            symbol="diamond", scale=tuple(self._atlas.resolution),
             features=features, face_color=colors)
+        self.viewer.dims.ndisplay = 3
 
     def _add_region(self):
         if self._atlas is None:
