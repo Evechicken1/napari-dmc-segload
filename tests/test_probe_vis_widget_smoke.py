@@ -4,7 +4,7 @@ import pytest
 from napari_dmc_segload import _probe_vis_widget as pv
 from napari_dmc_segload._probe_vis_widget import ProbeVisWidget
 from napari_dmc_segload.np2_scene import ROI_OPACITY as ROI_OPACITY_EXPECTED
-from napari_dmc_segload.np2_scene import point_colors
+from napari_dmc_segload.np2_scene import MODE_SHANK, point_colors
 
 MESHLESS_ACRONYM = "VISp"
 
@@ -261,6 +261,52 @@ def test_depth_filter_empty_then_restored_repopulates_colour(widget, np2_animal_
     assert colors.shape == (len(layer.data), 4)
     np.testing.assert_allclose(
         colors, point_colors(layer.features, w.form.colour_by.value, w._atlas))
+
+
+def test_visualize_adds_tract_layer_coloured_by_shank(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    assert ProbeVisWidget.TRACT_LAYER in [ly.name for ly in viewer.layers]
+    tr = viewer.layers[ProbeVisWidget.TRACT_LAYER]
+    assert len(tr.data) == 200                       # 4 shanks x 50 samples
+    np.testing.assert_allclose(tr.scale, [10.0, 10.0, 10.0])
+    np.testing.assert_allclose(
+        np.array(tr.face_color), point_colors(tr.features, MODE_SHANK, None))
+
+
+def test_depth_filter_leaves_tract_layer_untouched(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    tract_n = len(viewer.layers[ProbeVisWidget.TRACT_LAYER].data)
+    elec_full = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
+    w.form.limit_depth.value = True
+    w.form.max_depth_um.value = 3000.0
+    assert len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data) < elec_full   # filtered
+    assert len(viewer.layers[ProbeVisWidget.TRACT_LAYER].data) == tract_n     # unchanged
+
+
+def test_second_visualize_does_not_duplicate_tract_layer(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w._visualize()
+    names = [ly.name for ly in viewer.layers]
+    assert names.count(ProbeVisWidget.TRACT_LAYER) == 1
+
+
+def test_visualize_without_tract_csvs_still_builds_scene(widget, np2_animal_dir):
+    w, viewer = widget
+    root = np2_animal_dir / "results" / "neuropixels_probe"
+    for c in root.glob("*/*_neuropixels_probe.csv"):
+        c.unlink()
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()                                   # must not raise
+    names = [ly.name for ly in viewer.layers]
+    assert ProbeVisWidget.POINTS_LAYER in names
+    assert ProbeVisWidget.TRACT_LAYER not in names
+    assert "no tract overlay" in w.report.toPlainText()
 
 
 def test_colour_switch_still_works_with_depth_active(widget, np2_animal_dir):

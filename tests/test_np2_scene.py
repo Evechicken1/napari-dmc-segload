@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 
-from napari_dmc_segload.np2_scene import electrode_points, point_colors
+from napari_dmc_segload.np2_scene import (
+    MODE_SHANK, SHANK_COLORS, electrode_points, point_colors, tract_points)
 from conftest import NP2_COORD_COLS as COLS
-from conftest import make_electrode_frame
+from conftest import make_electrode_frame, make_tract_frame
 
 
 class _FakeMesh:
@@ -48,6 +49,35 @@ def test_point_colors_by_shank_gives_one_colour_per_shank(np2_frames):
     colors = point_colors(features, "shank", None)
     assert colors.shape == (800, 4)
     assert len({tuple(c) for c in colors}) == 4
+
+
+def test_tract_points_stacks_shanks_in_ascending_order(np2_tract_frames):
+    points, features = tract_points(np2_tract_frames, COLS)
+    assert points.shape == (200, 3)                       # 4 shanks x 50
+    assert list(features.columns) == ["shank"]
+    assert features["shank"].tolist()[:50] == [0] * 50
+    assert features["shank"].tolist()[-50:] == [3] * 50
+    np.testing.assert_allclose(
+        points[0], np2_tract_frames[0].iloc[0][COLS].to_numpy(dtype=float))
+
+
+def test_tract_points_shank_comes_from_dict_key_not_a_column():
+    frames = {2: make_tract_frame(2, n_rows=10)}          # keyed 2, no shank column
+    _, features = tract_points(frames, COLS)
+    assert features["shank"].unique().tolist() == [2]
+
+
+def test_tract_points_empty_frames_give_empty_result():
+    points, features = tract_points({}, COLS)
+    assert points.shape == (0, 3)
+    assert list(features.columns) == ["shank"] and len(features) == 0
+
+
+def test_tract_points_colour_by_shank_matches_electrode_palette(np2_tract_frames):
+    _, features = tract_points(np2_tract_frames, COLS)
+    colors = point_colors(features, MODE_SHANK, None)
+    np.testing.assert_allclose(colors[0], SHANK_COLORS[0])
+    np.testing.assert_allclose(colors[-1], SHANK_COLORS[3])
 
 
 def test_point_colors_by_region_uses_atlas_rgb(np2_frames):

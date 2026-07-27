@@ -17,12 +17,15 @@ from qtpy.QtGui import QFont
 from qtpy.QtWidgets import QCompleter, QWidget, QVBoxLayout, QPushButton, QTextEdit
 
 from .np2_qc import build_report, format_report
-from .np2_results import coord_cols, load_atlas, load_electrode_csvs, probe_results_dir
+from .np2_results import (
+    coord_cols, load_atlas, load_electrode_csvs, load_tract_csvs, probe_results_dir)
 from .np2_scene import (
-    COLOUR_MODES, REGION_OPACITY, ROI_OPACITY, ROOT_COLOR, ROOT_OPACITY,
-    atlas_acronyms, electrode_points, point_colors, region_meshes, roi_mesh, root_mesh)
+    COLOUR_MODES, MODE_SHANK, REGION_OPACITY, ROI_OPACITY, ROOT_COLOR, ROOT_OPACITY,
+    atlas_acronyms, electrode_points, point_colors, region_meshes, roi_mesh,
+    root_mesh, tract_points)
 
-POINT_SIZE_VOX = 2.0     # 2 voxels = 20 um across, visible without hiding anatomy
+POINT_SIZE_VOX = 2.0        # 2 voxels = 20 um across, visible without hiding anatomy
+TRACT_POINT_SIZE_VOX = 3.0  # slightly larger hollow rings; electrode discs read inside
 
 
 def _build_form() -> FunctionGui:
@@ -53,6 +56,7 @@ class ProbeVisWidget(QWidget):
     """Dock widget: 3D view + QC of a reconstructed NP2.0 probe."""
 
     POINTS_LAYER = "np2 electrodes"
+    TRACT_LAYER = "np2 tract points"
     ROOT_LAYER = "np2 root"
     REGION_PREFIX = "np2 region: "
     ROI_PREFIX = "np2 ROI: "
@@ -91,6 +95,7 @@ class ProbeVisWidget(QWidget):
         # loaded state, so recolouring/re-filtering never re-reads the CSVs
         self._atlas = None
         self._frames = None
+        self._tract_frames = None
         self._cols = None
 
         self.form.colour_by.changed.connect(self._render_points)
@@ -101,7 +106,7 @@ class ProbeVisWidget(QWidget):
     def _clear_layers(self):
         """Remove only the layers this widget added."""
         for layer in list(self.viewer.layers):
-            if (layer.name in (self.POINTS_LAYER, self.ROOT_LAYER)
+            if (layer.name in (self.POINTS_LAYER, self.TRACT_LAYER, self.ROOT_LAYER)
                     or layer.name.startswith(self.REGION_PREFIX)
                     or layer.name.startswith(self.ROI_PREFIX)):
                 self.viewer.layers.remove(layer)
@@ -122,6 +127,15 @@ class ProbeVisWidget(QWidget):
 
         cols = coord_cols(atlas)
 
+        # The registered tract overlay is optional: a missing/broken tract must
+        # never abort the electrode scene, only skip its own layer with a note.
+        try:
+            tract_frames = load_tract_csvs(input_path)
+            tract_note = ""
+        except (FileNotFoundError, ValueError) as e:
+            tract_frames = None
+            tract_note = f"note: no tract overlay ({e})\n"
+
         # Build everything that can fail from the atlas *before* touching the
         # viewer, so a bad mesh file (or any other scene-build error) reports
         # via show_info and leaves the user's existing layers untouched
@@ -135,6 +149,7 @@ class ProbeVisWidget(QWidget):
 
         self._atlas = atlas
         self._frames = frames
+        self._tract_frames = tract_frames
         self._cols = cols
 
         self._clear_layers()
@@ -152,11 +167,13 @@ class ProbeVisWidget(QWidget):
         self.form.add_region.choices = atlas_acronyms(atlas)
 
         self._render_points()
+        self._render_tract()
 
         text = format_report(build_report(frames, cols),
                              title=f"NP2.0 probe QC — {input_path.name}")
         if skipped:
             text += "note: this atlas has no mesh for: " + ", ".join(skipped) + "\n"
+        text += tract_note
         self.report.setPlainText(text)
 
         out = probe_results_dir(input_path) / f"{input_path.name}_np2_qc.txt"
@@ -191,6 +208,19 @@ class ProbeVisWidget(QWidget):
                 scale=tuple(self._atlas.resolution), features=features,
                 face_color=colors)
             self.viewer.dims.ndisplay = 3
+
+    def _render_tract(self):
+        """Add the registered tract samples as a static overlay, coloured by
+        shank. Built once per _visualize — the depth filter and colour mode
+        deliberately never touch it, so it stays a full-length reference."""
+        if not self._tract_frames:
+            return
+        points, features = tract_points(self._tract_frames, self._cols)
+        colors = point_colors(features, MODE_SHANK, None)
+        self.viewer.add_points(
+            points, name=self.TRACT_LAYER, size=TRACT_POINT_SIZE_VOX,
+            symbol="ring", scale=tuple(self._atlas.resolution),
+            features=features, face_color=colors)
 
     def _add_region(self):
         if self._atlas is None:
