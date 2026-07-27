@@ -89,7 +89,6 @@ class ProbeVisWidget(QWidget):
         self.layout().addWidget(self.report)
 
         # loaded state, so recolouring/re-filtering never re-reads the CSVs
-        self._features = None
         self._atlas = None
         self._frames = None
         self._cols = None
@@ -176,13 +175,16 @@ class ProbeVisWidget(QWidget):
             return
         max_depth = self.form.max_depth_um.value if self.form.limit_depth.value else None
         points, features = electrode_points(self._frames, self._cols, max_depth)
-        self._features = features
         colors = point_colors(features, self.form.colour_by.value, self._atlas)
         if self.POINTS_LAYER in self.viewer.layers:
             layer = self.viewer.layers[self.POINTS_LAYER]
             layer.data = points          # set data before face_color so lengths agree
             layer.features = features
-            layer.face_color = colors
+            if len(points):
+                # skip assigning an empty (0,4) face_color: napari treats it as
+                # illegal and resets to white with a UserWarning, and there is
+                # nothing to colour anyway. A later non-empty render restores it.
+                layer.face_color = colors
         else:
             self.viewer.add_points(
                 points, name=self.POINTS_LAYER, size=POINT_SIZE_VOX,

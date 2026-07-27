@@ -4,6 +4,7 @@ import pytest
 from napari_dmc_segload import _probe_vis_widget as pv
 from napari_dmc_segload._probe_vis_widget import ProbeVisWidget
 from napari_dmc_segload.np2_scene import ROI_OPACITY as ROI_OPACITY_EXPECTED
+from napari_dmc_segload.np2_scene import point_colors
 
 MESHLESS_ACRONYM = "VISp"
 
@@ -246,14 +247,35 @@ def test_depth_filter_below_all_leaves_empty_points_no_crash(widget, np2_animal_
     assert len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data) == 0
 
 
-def test_colour_switch_still_works_with_depth_active(widget, np2_animal_dir):
+def test_depth_filter_empty_then_restored_repopulates_colour(widget, np2_animal_dir):
     w, viewer = widget
     w.form.input_path.value = str(np2_animal_dir)
     w._visualize()
     w.form.limit_depth.value = True
+    w.form.max_depth_um.value = -1.0                # empty: face_color assignment skipped
+    assert len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data) == 0
+    w.form.max_depth_um.value = 3000.0               # back to a non-empty subset
+    layer = viewer.layers[ProbeVisWidget.POINTS_LAYER]
+    assert len(layer.data) > 0
+    colors = np.array(layer.face_color)
+    assert colors.shape == (len(layer.data), 4)
+    np.testing.assert_allclose(
+        colors, point_colors(layer.features, w.form.colour_by.value, w._atlas))
+
+
+def test_colour_switch_still_works_with_depth_active(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    full = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
+    w.form.limit_depth.value = True
     w.form.max_depth_um.value = 3000.0
     pts = viewer.layers[ProbeVisWidget.POINTS_LAYER]
+    n_filtered = len(pts.data)
+    assert 0 < n_filtered < full          # prove the filter is actually active
     before = np.array(pts.face_color, copy=True)
     w.form.colour_by.value = "electrode index"
-    after = np.array(viewer.layers[ProbeVisWidget.POINTS_LAYER].face_color)
+    after_layer = viewer.layers[ProbeVisWidget.POINTS_LAYER]
+    after = np.array(after_layer.face_color)
+    assert len(after_layer.data) == n_filtered
     assert after.shape == before.shape and not np.allclose(before, after)
