@@ -25,6 +25,13 @@ from .numbering import compute_slice_numbers, next_slice_number
 DISPLAY_CMAP = {"dapi": "blue", "green": "green", "n3": "cyan",
                 "cy3": "red", "cy5": "magenta"}
 
+FLIP_MARK = "⇄"   # appended to a section's label when it's flagged for h-flip
+
+
+def flip_label(slice_num, flip):
+    """On-screen label for a section: its number, plus a marker when flipped."""
+    return f"{int(slice_num)} {FLIP_MARK}" if flip else f"{int(slice_num)}"
+
 
 def _build_form() -> FunctionGui:
     @magicgui(
@@ -70,6 +77,7 @@ class SectionWidget(QWidget):
             ("Load overview", self._load_overview),
             ("Draw rectangles", self._draw_mode),
             ("Number sections (click in order)", self._number_mode),
+            ("Toggle flip (click sections)", self._toggle_flip_mode),
             ("Reset numbering", self._reset_numbering),
             ("Export crops", self._export),
         ]:
@@ -84,6 +92,7 @@ class SectionWidget(QWidget):
         self.fy = self.fx = 1.0
         self._order_by = "manual"
         self._manual = False
+        self._flip_mode = False
         self._counter = 1
 
     # --- helpers -----------------------------------------------------------
@@ -102,12 +111,34 @@ class SectionWidget(QWidget):
         return compute_slice_numbers([np.asarray(s) for s in shapes.data],
                                      self.ov_h, self._order_by)
 
-    def _set_numbers(self, nums):
+    def _get_flips(self):
+        shapes = self._shapes
+        if shapes is None:
+            return []
+        n = len(shapes.data)
+        cur = [bool(x) for x in list(shapes.features.get("flip", []))]
+        return (cur + [False] * n)[:n]             # new shapes default to no flip
+
+    def _apply(self, nums, flips):
+        """Single writer for the slices layer's features. Always rewrites all
+        three columns from the caller's nums+flips, so neither is ever lost."""
         shapes = self._shapes
         if shapes is None:
             return
-        shapes.features = {"slice": np.asarray(nums, dtype=int)}
+        nums, flips = list(nums), list(flips)
+        labels = [flip_label(n, f) for n, f in zip(nums, flips)]
+        shapes.features = {"slice": np.asarray(nums, dtype=int),
+                           "flip": np.asarray(flips, dtype=bool),
+                           "label": np.asarray(labels, dtype=object)}
         shapes.refresh_text()
+
+    def _set_numbers(self, nums):
+        self._apply(nums, self._get_flips())       # keep existing flips
+
+    def _toggle_flip(self, idx):
+        flips = self._get_flips()
+        flips[idx] = not flips[idx]
+        self._apply(self._get_numbers(), flips)    # keep existing numbers
 
     def _refresh_numbers(self, *_):
         self._set_numbers(self._get_numbers())
@@ -148,43 +179,69 @@ class SectionWidget(QWidget):
         shapes = self.viewer.add_shapes(
             name="slices", shape_type="rectangle",
             edge_color="yellow", edge_width=4, face_color="transparent",
-            features={"slice": np.zeros(0, dtype=int)},
-            text={"string": "{slice}", "size": 14, "color": "white",
+            features={"slice": np.zeros(0, dtype=int),
+                      "flip": np.zeros(0, dtype=bool),
+                      "label": np.empty(0, dtype=object)},
+            feature_defaults={"slice": 0, "flip": False, "label": "0"},
+            text={"string": "{label}", "size": 14, "color": "white",
                   "anchor": "center"},
         )
         shapes.mode = "add_rectangle"
 
         self._order_by = str(self.form.order_by.value)
         self._manual = self._order_by == "manual"
+        self._flip_mode = False
         self._counter = 1
         shapes.events.data.connect(self._refresh_numbers)
         shapes.mouse_drag_callbacks.append(self._click_to_number)
+        shapes.mouse_drag_callbacks.append(self._click_to_flip)
         show_info(f"loaded {in_path.name}: {n_ch}ch {self.H}x{self.W}")
 
+    @staticmethod
+    def _clicked_index(layer, event, dragged):
+        """Index of the shape under a plain (non-drag) click, else None."""
+        if dragged:                                # ignore box moves
+            return None
+        val = layer.get_value(event.position, world=True)
+        idx = val[0] if isinstance(val, (tuple, list)) else val
+        return None if idx is None else int(idx)
+
     def _click_to_number(self, layer, event):
-        # only act on a plain click while in manual-numbering (select) mode
-        if not self._manual or layer.mode != "select":
+        # only act on a plain click while numbering (not flipping) in select mode
+        if self._flip_mode or not self._manual or layer.mode != "select":
             return
         dragged = False
         yield
         while event.type == "mouse_move":
             dragged = True
             yield
-        if dragged:                                # ignore box moves
-            return
-        val = layer.get_value(event.position, world=True)
-        idx = val[0] if isinstance(val, (tuple, list)) else val
+        idx = self._clicked_index(layer, event, dragged)
         if idx is None:
             return
         nums = self._get_numbers()
-        nums[int(idx)] = self._counter
+        nums[idx] = self._counter
         self._counter += 1
         self._set_numbers(nums)
+
+    def _click_to_flip(self, layer, event):
+        # only act on a plain click while in flip (select) mode
+        if not self._flip_mode or layer.mode != "select":
+            return
+        dragged = False
+        yield
+        while event.type == "mouse_move":
+            dragged = True
+            yield
+        idx = self._clicked_index(layer, event, dragged)
+        if idx is None:
+            return
+        self._toggle_flip(idx)
 
     def _draw_mode(self):
         if self._shapes is None:
             show_info("Load an overview first.")
             return
+        self._flip_mode = False
         self._shapes.mode = "add_rectangle"
 
     def _number_mode(self):
@@ -192,8 +249,16 @@ class SectionWidget(QWidget):
             show_info("Load an overview first.")
             return
         self._manual = True
+        self._flip_mode = False
         self._counter = 1
         self._set_numbers([0] * len(self._shapes.data))
+        self._shapes.mode = "select"
+
+    def _toggle_flip_mode(self):
+        if self._shapes is None:
+            show_info("Load an overview first.")
+            return
+        self._flip_mode = True
         self._shapes.mode = "select"
 
     def _reset_numbering(self):
@@ -217,6 +282,7 @@ class SectionWidget(QWidget):
             return
 
         numbers = self._get_numbers()
+        flips = self._get_flips()
         if self._manual:
             if any(x <= 0 for x in numbers):
                 show_info("Some sections are unnumbered (showing 0); number them all.")
@@ -226,13 +292,13 @@ class SectionWidget(QWidget):
                 return
 
         boxes = []
-        for v, num in zip(rects, numbers):
+        for v, num, flip in zip(rects, numbers, flips):
             ys, xs = v[:, 0], v[:, 1]              # overview coords (row, col)
             r0 = int(np.clip(round(ys.min() * self.fy), 0, self.H))
             r1 = int(np.clip(round(ys.max() * self.fy), 0, self.H))
             c0 = int(np.clip(round(xs.min() * self.fx), 0, self.W))
             c1 = int(np.clip(round(xs.max() * self.fx), 0, self.W))
-            boxes.append((num, r0, r1, c0, c1))
+            boxes.append((num, r0, r1, c0, c1, flip))
         boxes.sort(key=lambda b: b[0])
 
         animal_id = str(self.form.animal_id.value).strip() or "animal"
@@ -247,13 +313,15 @@ class SectionWidget(QWidget):
 
         n = 0
         written = []
-        for num, r0, r1, c0, c1 in boxes:
+        for num, r0, r1, c0, c1, flip in boxes:
             if r1 <= r0 or c1 <= c0:
                 continue
             out_num = num + offset
             fname = f"{animal_id}_s{str(out_num).zfill(ZERO_PAD)}.tif"
             for ci, label in enumerate(self.labels):
                 crop = to_16bit(self.reader.crop_fullres(ci, r0, r1, c0, c1))
+                if flip:
+                    crop = np.ascontiguousarray(crop[:, ::-1])   # left<->right mirror
                 tifffile.imwrite(out_base / label / fname, crop)
             written.append(out_num)
             n += 1
