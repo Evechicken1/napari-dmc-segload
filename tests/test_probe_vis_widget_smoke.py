@@ -3,6 +3,10 @@ import pytest
 
 from napari_dmc_segload import _probe_vis_widget as pv
 from napari_dmc_segload._probe_vis_widget import ProbeVisWidget
+from napari_dmc_segload.np2_scene import ROI_OPACITY as ROI_OPACITY_EXPECTED
+from napari_dmc_segload.np2_scene import point_colors
+
+MESHLESS_ACRONYM = "VISp"
 
 
 class _FakeMesh:
@@ -20,12 +24,16 @@ class _FakeAtlas:
     resolution = (10.0, 10.0, 10.0)
     space = _FakeSpace()
     structures = {
-        "ORBl": {"rgb_triplet": [36, 138, 94]},
-        "MOs": {"rgb_triplet": [31, 157, 90]},
-        "root": {"rgb_triplet": [255, 255, 255]},
+        "ORBl": {"acronym": "ORBl", "rgb_triplet": [36, 138, 94]},
+        "MOs": {"acronym": "MOs", "rgb_triplet": [31, 157, 90]},
+        "root": {"acronym": "root", "rgb_triplet": [255, 255, 255]},
+        "LDT": {"acronym": "LDT", "rgb_triplet": [255, 0, 0]},
+        MESHLESS_ACRONYM: {"acronym": MESHLESS_ACRONYM, "rgb_triplet": [128, 128, 128]},
     }
 
     def mesh_from_structure(self, acronym):
+        if acronym == MESHLESS_ACRONYM:
+            raise KeyError(acronym)
         return _FakeMesh()
 
 
@@ -163,3 +171,111 @@ def test_qc_write_failure_still_adds_scene_and_fills_panel(
     assert ProbeVisWidget.POINTS_LAYER in names
     assert ProbeVisWidget.ROOT_LAYER in names
     assert "shank 0" in w.report.toPlainText()
+
+
+def test_visualize_populates_region_dropdown(widget, np2_animal_dir):
+    w, _ = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    choices = list(w.form.add_region.choices)
+    assert len(choices) > 0
+    assert "LDT" in choices
+
+
+def test_add_region_adds_highlighted_roi_layer(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.add_region.value = "LDT"
+    w._add_region()
+    name = ProbeVisWidget.ROI_PREFIX + "LDT"
+    assert name in [ly.name for ly in viewer.layers]
+    assert viewer.layers[name].opacity == pytest.approx(ROI_OPACITY_EXPECTED)
+
+
+def test_add_region_before_visualize_aborts_cleanly(widget):
+    w, viewer = widget
+    w._add_region()                      # must not raise
+    assert not any(ly.name.startswith(ProbeVisWidget.ROI_PREFIX) for ly in viewer.layers)
+
+
+def test_add_region_meshless_reports_and_adds_no_layer(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.add_region.value = MESHLESS_ACRONYM     # defined on the fake atlas
+    w._add_region()                                 # must not raise
+    assert not any(ly.name.startswith(ProbeVisWidget.ROI_PREFIX) for ly in viewer.layers)
+
+
+def test_second_visualize_clears_roi_layers(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.add_region.value = "LDT"
+    w._add_region()
+    w._visualize()
+    assert not any(ly.name.startswith(ProbeVisWidget.ROI_PREFIX) for ly in viewer.layers)
+
+
+def test_depth_filter_hides_deep_electrodes_and_restores(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    full = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
+    n_region = sum(ly.name.startswith(ProbeVisWidget.REGION_PREFIX) for ly in viewer.layers)
+    qc_before = w.report.toPlainText()
+    # enable a mid-range max depth
+    w.form.limit_depth.value = True
+    w.form.max_depth_um.value = 3000.0
+    filtered = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
+    assert 0 < filtered < full
+    # region meshes and QC untouched by a display filter
+    assert sum(ly.name.startswith(ProbeVisWidget.REGION_PREFIX) for ly in viewer.layers) == n_region
+    assert w.report.toPlainText() == qc_before
+    # disable -> restored
+    w.form.limit_depth.value = False
+    assert len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data) == full
+
+
+def test_depth_filter_below_all_leaves_empty_points_no_crash(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.limit_depth.value = True
+    w.form.max_depth_um.value = -1.0
+    assert len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data) == 0
+
+
+def test_depth_filter_empty_then_restored_repopulates_colour(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    w.form.limit_depth.value = True
+    w.form.max_depth_um.value = -1.0                # empty: face_color assignment skipped
+    assert len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data) == 0
+    w.form.max_depth_um.value = 3000.0               # back to a non-empty subset
+    layer = viewer.layers[ProbeVisWidget.POINTS_LAYER]
+    assert len(layer.data) > 0
+    colors = np.array(layer.face_color)
+    assert colors.shape == (len(layer.data), 4)
+    np.testing.assert_allclose(
+        colors, point_colors(layer.features, w.form.colour_by.value, w._atlas))
+
+
+def test_colour_switch_still_works_with_depth_active(widget, np2_animal_dir):
+    w, viewer = widget
+    w.form.input_path.value = str(np2_animal_dir)
+    w._visualize()
+    full = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
+    w.form.limit_depth.value = True
+    w.form.max_depth_um.value = 3000.0
+    pts = viewer.layers[ProbeVisWidget.POINTS_LAYER]
+    n_filtered = len(pts.data)
+    assert 0 < n_filtered < full          # prove the filter is actually active
+    before = np.array(pts.face_color, copy=True)
+    w.form.colour_by.value = "electrode index"
+    after_layer = viewer.layers[ProbeVisWidget.POINTS_LAYER]
+    after = np.array(after_layer.face_color)
+    assert len(after_layer.data) == n_filtered
+    assert after.shape == before.shape and not np.allclose(before, after)

@@ -137,3 +137,80 @@ def test_region_meshes_caps_the_number_of_regions():
     meshes, skipped = region_meshes({0: df}, _FakeAtlas(), min_electrodes=1, max_regions=2)
     assert skipped == []
     assert [m["acronym"] for m in meshes] == ["ORBl", "ORBm"]     # cap size AND ranking
+
+
+from napari_dmc_segload.np2_scene import atlas_acronyms, roi_mesh, ROI_OPACITY
+from conftest import make_electrode_frame
+from conftest import NP2_COORD_COLS as COLS
+
+
+class _RoiAtlas:
+    resolution = (10.0, 10.0, 10.0)
+    structures = {
+        "ORBl": {"acronym": "ORBl", "rgb_triplet": [36, 138, 94]},
+        "MOs": {"acronym": "MOs", "rgb_triplet": [31, 157, 90]},
+        "LDT": {"acronym": "LDT", "rgb_triplet": [255, 0, 0]},
+        "root": {"acronym": "root", "rgb_triplet": [255, 255, 255]},
+    }
+    meshless = {"MOs"}
+
+    def mesh_from_structure(self, acronym):
+        if acronym not in self.structures or acronym in self.meshless:
+            raise KeyError(acronym)
+        pts = __import__("numpy").arange(12, dtype=float).reshape(4, 3)
+        cell = type("C", (), {"data": __import__("numpy").arange(12).reshape(-1, 3)})()
+        return type("M", (), {"points": pts, "cells": [cell]})()
+
+
+def test_atlas_acronyms_sorted_and_complete():
+    acs = atlas_acronyms(_RoiAtlas())
+    assert acs == sorted(acs)
+    assert set(acs) == {"ORBl", "MOs", "LDT", "root"}
+
+
+def test_roi_mesh_returns_mesh_dict_for_meshed_structure():
+    m = roi_mesh(_RoiAtlas(), "LDT")
+    assert m["acronym"] == "LDT"
+    assert m["vertices"].shape[1] == 3 and m["faces"].shape[1] == 3
+    import numpy as np
+    np.testing.assert_allclose(m["color"][:3], [1.0, 0.0, 0.0])
+
+
+def test_roi_mesh_missing_mesh_raises_valueerror():
+    import pytest
+    with pytest.raises(ValueError, match="MOs"):
+        roi_mesh(_RoiAtlas(), "MOs")
+    with pytest.raises(ValueError, match="NOPE"):
+        roi_mesh(_RoiAtlas(), "NOPE")
+
+
+def test_electrode_points_max_depth_filters_inclusive():
+    frames = {0: make_electrode_frame(0, n_rows=100)}          # depth_um 175..? decreasing with z
+    full, _ = electrode_points(frames, COLS)
+    dmax = float(frames[0]["depth_um"].median())
+    pts, feats = electrode_points(frames, COLS, max_depth=dmax)
+    kept = (frames[0]["depth_um"] <= dmax).sum()
+    assert len(pts) == kept == len(feats)
+    assert len(pts) < len(full)
+
+
+def test_electrode_points_max_depth_none_is_unchanged():
+    frames = {0: make_electrode_frame(0)}
+    a, _ = electrode_points(frames, COLS)
+    b, _ = electrode_points(frames, COLS, max_depth=None)
+    import numpy as np
+    np.testing.assert_array_equal(a, b)
+
+
+def test_electrode_points_max_depth_below_all_gives_empty():
+    frames = {0: make_electrode_frame(0)}
+    pts, feats = electrode_points(frames, COLS, max_depth=-1e9)
+    assert pts.shape == (0, 3) and len(feats) == 0
+
+
+def test_point_colors_empty_features_all_modes():
+    import numpy as np
+    _, feats = electrode_points({0: make_electrode_frame(0)}, COLS, max_depth=-1e9)
+    for mode in ("shank", "region", "electrode index"):
+        c = point_colors(feats, mode, _RoiAtlas())
+        assert c.shape == (0, 4)
