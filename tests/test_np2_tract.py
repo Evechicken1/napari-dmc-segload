@@ -79,3 +79,19 @@ def test_shank_direction_normalises_and_rejects_zero():
     np.testing.assert_allclose(shank_direction(np.array([0.0, -3.0, 0.0])), [0.0, -1.0, 0.0])
     with pytest.raises(ValueError):
         shank_direction(np.zeros(3))
+
+
+def test_recover_line_accepts_alternate_distance_column():
+    a = np.array([100.0, 200.0, 50.0])
+    b = np.array([0.02, -0.10, 0.0])
+    df = _synthetic_tract(a, b, insert=4000).rename(
+        columns={"distance_to_tip(um)": "distance_to_tip_um"})
+    point, slope = recover_line(df, COLS, dist_col="distance_to_tip_um")
+    np.testing.assert_allclose(point, a, atol=1.0)
+    np.testing.assert_allclose(slope, b, atol=0.01)
+
+
+def test_recover_line_missing_alternate_distance_column_raises():
+    df = _synthetic_tract(np.zeros(3), np.zeros(3), insert=1000)
+    with pytest.raises(ValueError, match="distance_to_tip_um"):
+        recover_line(df, COLS, dist_col="distance_to_tip_um")

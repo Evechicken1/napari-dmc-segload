@@ -74,3 +74,32 @@ context, so a headless `QT_QPA_PLATFORM=offscreen` run will fail):
 pip install -e ".[testing]"
 pytest tests/ -v
 ```
+
+## NP2.0 probe visualization
+
+After running **NP2.0 electrodes**, open `Plugins → DMC Segmentation Loader →
+NP2.0 probe visualization` to check the reconstruction.
+
+1. Set **input path** to the same animal folder.
+2. Click **Visualize probe**. The viewer switches to 3D and gains:
+   - `np2 root` — the translucent brain outline,
+   - `np2 region: <acronym>` — one surface per structure the electrodes pass
+     through (the largest 12, ignoring structures with fewer than 10
+     electrodes),
+   - `np2 electrodes` — every reconstructed electrode from every shank.
+3. Use **colour by** to switch between:
+   - `shank` — one colour per shank,
+   - `region` — the atlas colour of each electrode's structure,
+   - `electrode index` — a viridis ramp over the physical electrode index,
+     normalised across all shanks. A correctly placed shank shows a smooth
+     tip→top gradient; a reversed gradient means the fit ran the wrong way.
+
+The QC panel below the button reports, per shank, the electrode count inside the
+brain, insertion depth, tip voxel, angle from the DV axis and the region ladder;
+then every shank pair's tip distance against the expected 250 µm × index span
+and the angle between them. Anything outside tolerance is listed under
+`warnings`. The same text is written to
+`results/neuropixels_probe/<animal>_np2_qc.txt`.
+
+This widget only reads the electrode CSVs — it never recomputes the
+reconstruction.
