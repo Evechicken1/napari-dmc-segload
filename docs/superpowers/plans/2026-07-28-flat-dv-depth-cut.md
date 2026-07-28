@@ -273,11 +273,11 @@ def test_depth_filter_is_flat_across_staggered_entries(widget, tmp_path):
     w._visualize()
     full = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
     w.form.limit_depth.value = True
-    w.form.max_depth_um.value = 1500.0
+    w.form.max_depth_um.value = 3000.0
     layer = viewer.layers[ProbeVisWidget.POINTS_LAYER]
     assert 0 < len(layer.data) < full
     dv_ref = highest_entry_dv(w._frames, "dv_coords")
-    dv_cut = dv_ref + 1500.0 / 10.0
+    dv_cut = dv_ref + 3000.0 / 10.0
     dv_index = w._atlas.space.axes_description.index("si")   # ("ap","si","rl") -> 1
     assert np.all(np.asarray(layer.data)[:, dv_index] <= dv_cut + 1e-6)
 ```
