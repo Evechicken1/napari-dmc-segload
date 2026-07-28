@@ -350,3 +350,35 @@ def test_colour_switch_still_works_with_depth_active(widget, np2_animal_dir):
     after = np.array(after_layer.face_color)
     assert len(after_layer.data) == n_filtered
     assert after.shape == before.shape and not np.allclose(before, after)
+
+
+def _write_staggered_animal(base, inserts):
+    import json
+    from napari_dmc_segload.np2_results import ELECTRODE_CSV_SUFFIX
+    from conftest import make_electrode_frame
+    root = base / "results" / "neuropixels_probe"
+    for shank, ins in enumerate(inserts):
+        sd = root / f"neuropixels_probe_{shank}"
+        sd.mkdir(parents=True)
+        make_electrode_frame(shank, insert=ins).to_csv(
+            sd / f"{base.name}{ELECTRODE_CSV_SUFFIX}", index=False)
+    (base / "params.json").write_text(
+        json.dumps({"atlas_info": {"atlas": "allen_mouse_10um"}}))
+    return base
+
+
+def test_depth_filter_is_flat_across_staggered_entries(widget, tmp_path):
+    from napari_dmc_segload.np2_scene import highest_entry_dv
+    w, viewer = widget
+    base = _write_staggered_animal(tmp_path / "animalS", [4000.0, 3000.0, 3500.0, 3800.0])
+    w.form.input_path.value = str(base)
+    w._visualize()
+    full = len(viewer.layers[ProbeVisWidget.POINTS_LAYER].data)
+    w.form.limit_depth.value = True
+    w.form.max_depth_um.value = 3000.0
+    layer = viewer.layers[ProbeVisWidget.POINTS_LAYER]
+    assert 0 < len(layer.data) < full
+    dv_ref = highest_entry_dv(w._frames, "dv_coords")
+    dv_cut = dv_ref + 3000.0 / 10.0
+    dv_index = w._atlas.space.axes_description.index("si")   # ("ap","si","rl") -> 1
+    assert np.all(np.asarray(layer.data)[:, dv_index] <= dv_cut + 1e-6)

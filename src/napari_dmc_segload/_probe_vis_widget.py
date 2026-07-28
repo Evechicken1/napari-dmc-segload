@@ -18,11 +18,11 @@ from qtpy.QtWidgets import QCompleter, QWidget, QVBoxLayout, QPushButton, QTextE
 
 from .np2_qc import build_report, format_report
 from .np2_results import (
-    coord_cols, load_atlas, load_electrode_csvs, probe_results_dir)
+    AXIS_TO_COORD_COL, coord_cols, load_atlas, load_electrode_csvs, probe_results_dir)
 from .np2_scene import (
     COLOUR_MODES, MODE_SHANK, REGION_OPACITY, ROI_OPACITY, ROOT_COLOR, ROOT_OPACITY,
-    atlas_acronyms, electrode_points, point_colors, region_meshes, roi_mesh,
-    root_mesh)
+    atlas_acronyms, electrode_points, highest_entry_dv, point_colors, region_meshes,
+    roi_mesh, root_mesh)
 from .np2_segpoints import (
     NONE_CHANNEL, register_probe_clicks, registration_channels, stack_shank_points)
 
@@ -187,11 +187,27 @@ class ProbeVisWidget(QWidget):
     def _render_points(self, *_):
         """Rebuild the electrode layer from the stored full frames under the
         current depth filter + colour mode. Routes both colour-mode switches
-        and the depth filter through one path so they always stay in sync."""
+        and the depth filter through one path so they always stay in sync.
+
+        When 'limit depth' is on the cut is a flat dorsoventral plane referenced
+        to the shallowest shank entry point (see np2_scene.highest_entry_dv), so
+        every shank is trimmed at the same absolute DV rather than at its own
+        dura. A degenerate shank (no locatable entry) is reported and the layer
+        is left as-is."""
         if self._frames is None:
             return
-        max_depth = self.form.max_depth_um.value if self.form.limit_depth.value else None
-        points, features = electrode_points(self._frames, self._cols, max_depth)
+        if self.form.limit_depth.value:
+            dv_col = AXIS_TO_COORD_COL["si"]
+            try:
+                dv_ref = highest_entry_dv(self._frames, dv_col)
+            except ValueError as e:
+                show_info(str(e))
+                return
+            points, features = electrode_points(
+                self._frames, self._cols, self.form.max_depth_um.value,
+                dv_col=dv_col, dv_ref=dv_ref, voxel_um=self._dv_voxel_um())
+        else:
+            points, features = electrode_points(self._frames, self._cols)
         colors = point_colors(features, self.form.colour_by.value, self._atlas)
         if self.POINTS_LAYER in self.viewer.layers:
             layer = self.viewer.layers[self.POINTS_LAYER]
@@ -208,6 +224,11 @@ class ProbeVisWidget(QWidget):
                 scale=tuple(self._atlas.resolution), features=features,
                 face_color=colors)
             self.viewer.dims.ndisplay = 3
+
+    def _dv_voxel_um(self):
+        """um per voxel along the atlas DV (si) axis."""
+        axes = self._atlas.space.axes_description
+        return float(self._atlas.resolution[axes.index("si")])
 
     def _render_segpoints(self, *_):
         """Show the raw registered segmentation clicks for the selected

@@ -31,21 +31,31 @@ _INDEX_CMAP_STOPS = np.array([
 ])
 
 
-def electrode_points(frames, coord_cols, max_depth=None):
+def electrode_points(frames, coord_cols, max_depth=None, *,
+                     dv_col=None, dv_ref=None, voxel_um=None):
     """Stack every shank's electrodes into one point array + feature table.
 
     Shanks are concatenated in ascending index order, rows in file order.
     Returns (points (N,3) float voxel coords, features DataFrame with columns
     shank, acronym, electrode).
 
-    If `max_depth` is not None, electrodes with depth_um greater than it are
-    dropped (display filter); the tip stays, the shallow end is trimmed.
+    If `max_depth` (um) is not None, a flat dorsoventral cut is applied,
+    referenced to one common entry point rather than each shank's own dura:
+    electrodes whose `dv_col` voxel coordinate lies more than `max_depth` below
+    `dv_ref` (the shallowest shank entry, in voxels) are dropped. `dv_col`,
+    `dv_ref` and `voxel_um` (the DV-axis um-per-voxel resolution) are then all
+    required. The deep/tip end is trimmed; the shallow band is kept.
     """
+    if max_depth is not None:
+        if dv_col is None or dv_ref is None or voxel_um is None:
+            raise ValueError(
+                "max_depth filter requires dv_col, dv_ref and voxel_um")
+        dv_cut = dv_ref + max_depth / voxel_um
     points, feats = [], []
     for shank in sorted(frames):
         df = frames[shank]
         if max_depth is not None:
-            df = df[df["depth_um"] <= max_depth]
+            df = df[df[dv_col] <= dv_cut]
         points.append(df[coord_cols].to_numpy(dtype=float))
         feats.append(pd.DataFrame({
             "shank": df["shank"].to_numpy(dtype=int),
@@ -54,6 +64,29 @@ def electrode_points(frames, coord_cols, max_depth=None):
         }))
     pts = np.concatenate(points, axis=0) if points else np.zeros((0, 3))
     return pts, pd.concat(feats, ignore_index=True)
+
+
+def highest_entry_dv(frames, dv_col):
+    """DV voxel coordinate of the shallowest (most dorsal) shank entry point.
+
+    Each shank's electrodes are colinear, so `dv_col` is a linear function of
+    `depth_um`; the intercept at depth_um=0 is that shank's dura crossing (entry
+    point). Returns the minimum such intercept across shanks — the highest entry
+    point — as a float in atlas voxels. Assumes an atlas where dv increases
+    ventrally (allen convention), so most dorsal = smallest dv. Raises ValueError
+    if any shank has fewer than two distinct depths (cannot locate its entry).
+    """
+    entries = []
+    for shank in sorted(frames):
+        df = frames[shank]
+        depth = df["depth_um"].to_numpy(dtype=float)
+        dv = df[dv_col].to_numpy(dtype=float)
+        if len(np.unique(depth)) < 2:
+            raise ValueError(
+                f"shank {shank}: need >= 2 distinct depths to locate the entry point")
+        _slope, intercept = np.polyfit(depth, dv, 1)
+        entries.append(float(intercept))
+    return min(entries)
 
 
 def point_colors(features, mode, atlas):

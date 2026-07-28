@@ -184,14 +184,18 @@ def test_roi_mesh_missing_mesh_raises_valueerror():
         roi_mesh(_RoiAtlas(), "NOPE")
 
 
-def test_electrode_points_max_depth_filters_inclusive():
-    frames = {0: make_electrode_frame(0, n_rows=100)}          # depth_um 175..? decreasing with z
+def test_electrode_points_flat_cut_single_shank_matches_depth():
+    # one shank: dv_ref is its own entry, so the flat cut reduces to depth<=max.
+    frames = {0: make_electrode_frame(0, n_rows=100)}
     full, _ = electrode_points(frames, COLS)
-    dmax = float(frames[0]["depth_um"].median())
-    pts, feats = electrode_points(frames, COLS, max_depth=dmax)
-    kept = (frames[0]["depth_um"] <= dmax).sum()
+    dv_ref = highest_entry_dv(frames, "dv_coords")
+    dmax, voxel_um = float(frames[0]["depth_um"].median()), 10.0
+    dv_cut = dv_ref + dmax / voxel_um
+    pts, feats = electrode_points(frames, COLS, max_depth=dmax,
+                                  dv_col="dv_coords", dv_ref=dv_ref, voxel_um=voxel_um)
+    kept = (frames[0]["dv_coords"] <= dv_cut).sum()
     assert len(pts) == kept == len(feats)
-    assert len(pts) < len(full)
+    assert 0 < len(pts) < len(full)
 
 
 def test_electrode_points_max_depth_none_is_unchanged():
@@ -204,13 +208,71 @@ def test_electrode_points_max_depth_none_is_unchanged():
 
 def test_electrode_points_max_depth_below_all_gives_empty():
     frames = {0: make_electrode_frame(0)}
-    pts, feats = electrode_points(frames, COLS, max_depth=-1e9)
+    dv_ref = highest_entry_dv(frames, "dv_coords")
+    pts, feats = electrode_points(frames, COLS, max_depth=-1e9,
+                                  dv_col="dv_coords", dv_ref=dv_ref, voxel_um=10.0)
     assert pts.shape == (0, 3) and len(feats) == 0
 
 
 def test_point_colors_empty_features_all_modes():
     import numpy as np
-    _, feats = electrode_points({0: make_electrode_frame(0)}, COLS, max_depth=-1e9)
+    frames = {0: make_electrode_frame(0)}
+    dv_ref = highest_entry_dv(frames, "dv_coords")
+    _, feats = electrode_points(frames, COLS, max_depth=-1e9,
+                                dv_col="dv_coords", dv_ref=dv_ref, voxel_um=10.0)
     for mode in ("shank", "region", "electrode index"):
         c = point_colors(feats, mode, _RoiAtlas())
         assert c.shape == (0, 4)
+
+
+from napari_dmc_segload.np2_scene import highest_entry_dv
+
+
+def test_highest_entry_dv_returns_most_dorsal_entry():
+    # shank 0 inserted deeper (larger insert) -> more dorsal (smaller dv) entry.
+    # For this synthetic geometry entry dv = 400 - 0.1*insert -> 0.0 and 100.0.
+    frames = {0: make_electrode_frame(0, insert=4000.0),
+              1: make_electrode_frame(1, insert=3000.0)}
+    ref = highest_entry_dv(frames, "dv_coords")
+    assert ref == pytest.approx(0.0, abs=1.0)
+
+
+def test_highest_entry_dv_raises_on_degenerate_shank():
+    import pandas as pd
+    frames = {0: pd.DataFrame({"depth_um": [50.0, 50.0, 50.0],
+                               "dv_coords": [7, 7, 7]})}
+    with pytest.raises(ValueError, match="entry point"):
+        highest_entry_dv(frames, "dv_coords")
+
+
+def test_electrode_points_flat_cut_is_common_across_staggered_shanks():
+    import numpy as np
+    from conftest import NP2_TIP0, NP2_SHANK_PITCH_VOX
+    # Parallel shanks translated in DV: shank i's tip (and hence its whole
+    # electrode DV range) sits 100 voxels deeper than shank i-1, so their
+    # entry points are staggered — the case where a flat DV cut actually
+    # differs from a per-shank one. (Varying `insert` alone does NOT stagger
+    # the physical dv_coords, only the depth_um labels, so it cannot be used.)
+    def tip(i):
+        return NP2_TIP0 + np.array([0.0, 100.0 * i, NP2_SHANK_PITCH_VOX * i])
+    frames = {0: make_electrode_frame(0, tip=tip(0)),
+              1: make_electrode_frame(1, tip=tip(1))}
+    dv_ref = highest_entry_dv(frames, "dv_coords")          # shank 0, ~= 0.0
+    max_depth, voxel_um = 3500.0, 10.0
+    dv_cut = dv_ref + max_depth / voxel_um                   # ~= 350 voxels
+    pts, feats = electrode_points(frames, COLS, max_depth=max_depth,
+                                  dv_col="dv_coords", dv_ref=dv_ref, voxel_um=voxel_um)
+    dv_index = COLS.index("dv_coords")
+    # every kept electrode (any shank) is at or above the SAME absolute dv level
+    assert np.all(pts[:, dv_index] <= dv_cut + 1e-6)
+    # the deeper-entering shank keeps fewer electrodes than the reference shank
+    kept0 = int((frames[0]["dv_coords"] <= dv_cut).sum())
+    kept1 = int((frames[1]["dv_coords"] <= dv_cut).sum())
+    assert 0 < kept1 < kept0
+    assert len(pts) == kept0 + kept1 == len(feats)
+
+
+def test_electrode_points_flat_cut_requires_dv_args():
+    frames = {0: make_electrode_frame(0)}
+    with pytest.raises(ValueError, match="dv_col"):
+        electrode_points(frames, COLS, max_depth=1000.0)
