@@ -214,3 +214,23 @@ def test_point_colors_empty_features_all_modes():
     for mode in ("shank", "region", "electrode index"):
         c = point_colors(feats, mode, _RoiAtlas())
         assert c.shape == (0, 4)
+
+
+from napari_dmc_segload.np2_scene import highest_entry_dv
+
+
+def test_highest_entry_dv_returns_most_dorsal_entry():
+    # shank 0 inserted deeper (larger insert) -> more dorsal (smaller dv) entry.
+    # For this synthetic geometry entry dv = 400 - 0.1*insert -> 0.0 and 100.0.
+    frames = {0: make_electrode_frame(0, insert=4000.0),
+              1: make_electrode_frame(1, insert=3000.0)}
+    ref = highest_entry_dv(frames, "dv_coords")
+    assert ref == pytest.approx(0.0, abs=1.0)
+
+
+def test_highest_entry_dv_raises_on_degenerate_shank():
+    import pandas as pd
+    frames = {0: pd.DataFrame({"depth_um": [50.0, 50.0, 50.0],
+                               "dv_coords": [7, 7, 7]})}
+    with pytest.raises(ValueError, match="entry point"):
+        highest_entry_dv(frames, "dv_coords")

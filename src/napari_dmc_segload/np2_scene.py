@@ -56,6 +56,29 @@ def electrode_points(frames, coord_cols, max_depth=None):
     return pts, pd.concat(feats, ignore_index=True)
 
 
+def highest_entry_dv(frames, dv_col):
+    """DV voxel coordinate of the shallowest (most dorsal) shank entry point.
+
+    Each shank's electrodes are colinear, so `dv_col` is a linear function of
+    `depth_um`; the intercept at depth_um=0 is that shank's dura crossing (entry
+    point). Returns the minimum such intercept across shanks — the highest entry
+    point — as a float in atlas voxels. Assumes an atlas where dv increases
+    ventrally (allen convention), so most dorsal = smallest dv. Raises ValueError
+    if any shank has fewer than two distinct depths (cannot locate its entry).
+    """
+    entries = []
+    for shank in sorted(frames):
+        df = frames[shank]
+        depth = df["depth_um"].to_numpy(dtype=float)
+        dv = df[dv_col].to_numpy(dtype=float)
+        if len(np.unique(depth)) < 2:
+            raise ValueError(
+                f"shank {shank}: need >= 2 distinct depths to locate the entry point")
+        _slope, intercept = np.polyfit(depth, dv, 1)
+        entries.append(float(intercept))
+    return min(entries)
+
+
 def point_colors(features, mode, atlas):
     """RGBA (N,4) for each electrode under the given colour mode.
 
