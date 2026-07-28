@@ -47,10 +47,12 @@ def _build_form() -> FunctionGui:
                       value="manual"),
         overview_scale=dict(widget_type="FloatSpinBox", label="overview scale",
                             value=0.1, min=0.001, max=1.0, step=0.01),
+        flip_vertical=dict(widget_type="CheckBox", label="flip vertically",
+                           value=False),
         call_button=False,
     )
     def form(input_path, animal_id, output_root, channel_labels,
-             order_by, overview_scale):
+             order_by, overview_scale, flip_vertical):
         pass
 
     # auto-fill animal_id from the chosen file's stem
@@ -151,7 +153,7 @@ class SectionWidget(QWidget):
             return
         in_path = Path(str(in_path))
 
-        self.reader = make_reader(in_path)
+        self.reader = make_reader(in_path, flip_y=bool(self.form.flip_vertical.value))
         n_ch, self.H, self.W = self.reader.shape
         labels = [s.strip() for s in str(self.form.channel_labels.value).split(",")
                   if s.strip()]

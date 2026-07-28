@@ -139,7 +139,37 @@ class TiffReader:
         return self._read(c, slice(r0, r1), slice(c0, c1))
 
 
-def make_reader(path: Path):
+class VerticalFlipReader:
+    """Wrap a base reader so the slide is mirrored top<->bottom (y-axis).
+
+    A vertical flip is just row reversal, applied at read time so the full slide
+    is never loaded: the overview is reversed in memory (it is downsampled), and
+    each crop reads the mirror-image row band and reverses it. Every attribute
+    other than the two flipped read methods is delegated to the base reader.
+    """
+
+    def __init__(self, base):
+        self._base = base
+
+    def __getattr__(self, name):
+        # only reached when normal lookup fails, i.e. not for the members below
+        return getattr(self._base, name)
+
+    @property
+    def shape(self):
+        return self._base.shape
+
+    def overview(self, scale):
+        return self._base.overview(scale)[:, ::-1, :]
+
+    def crop_fullres(self, c, r0, r1, c0, c1):
+        H = self._base.shape[1]
+        return self._base.crop_fullres(c, H - r1, H - r0, c0, c1)[::-1, :]
+
+
+def make_reader(path, flip_y=False):
     if Path(path).suffix.lower() == ".czi":
-        return CziReader(Path(path))
-    return TiffReader(Path(path))
+        base = CziReader(Path(path))
+    else:
+        base = TiffReader(Path(path))
+    return VerticalFlipReader(base) if flip_y else base

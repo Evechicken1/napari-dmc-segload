@@ -92,3 +92,75 @@ def test_export_without_load_is_a_noop(make_napari_viewer, tmp_path):
     w = SectionWidget(viewer)
     w._export()  # must not raise
     assert len(viewer.layers) == 0
+
+
+from napari_dmc_segload.readers import make_reader
+
+
+def _write_topbottom_tif(path, n_ch=3, h=40, w=60):
+    # top half a distinct value from the bottom half, per channel, so a
+    # vertical flip is detectable in both the overview and an exported crop
+    arr = np.zeros((n_ch, h, w), dtype=np.uint16)
+    for c in range(n_ch):
+        arr[c, :h // 2, :] = (c + 1) * 1000          # top half
+        arr[c, h // 2:, :] = (c + 1) * 1000 + 500    # bottom half
+    tifffile.imwrite(str(path), arr)
+    return arr
+
+
+def test_flip_vertical_reverses_displayed_overview(make_napari_viewer, tmp_path):
+    p = tmp_path / "slide.tif"
+    _write_topbottom_tif(p, n_ch=3, h=40, w=60)
+    viewer = make_napari_viewer()
+    w = SectionWidget(viewer)
+    w.form.input_path.value = str(p)
+    w.form.channel_labels.value = "green,cy3,dapi"
+    w.form.overview_scale.value = 0.1
+    w.form.flip_vertical.value = True
+    w._load_overview()
+    plain_ov = make_reader(p, flip_y=False).overview(0.1)   # (3, 4, 6)
+    # cy3 is channel index 1; the displayed layer is its rows reversed
+    np.testing.assert_array_equal(
+        np.asarray(viewer.layers["cy3"].data), plain_ov[1][::-1, :])
+
+
+def test_flip_vertical_export_pulls_from_bottom(make_napari_viewer, tmp_path):
+    p = tmp_path / "slide.tif"
+    _write_topbottom_tif(p, n_ch=3, h=40, w=60)
+    out_root = tmp_path / "dmc_input"
+    viewer = make_napari_viewer()
+    w = SectionWidget(viewer)
+    w.form.input_path.value = str(p)
+    w.form.animal_id.value = "m1"
+    w.form.output_root.value = str(out_root)
+    w.form.channel_labels.value = "green,cy3,dapi"
+    w.form.order_by.value = "draw"
+    w.form.overview_scale.value = 0.1
+    w.form.flip_vertical.value = True
+    w._load_overview()
+    # box over the TOP two overview rows (overview 4x6 -> full rows 0..20);
+    # with flip on, that reads the BOTTOM half of the source
+    viewer.layers["slices"].data = [_rect(0, 0, 2, 6)]
+    w._export()
+    crop = tifffile.imread(str(out_root / "m1" / "stitched" / "cy3" / "m1_s001.tif"))
+    assert np.all(crop == 2500)          # cy3 bottom-half value
+
+
+def test_no_flip_export_pulls_from_top(make_napari_viewer, tmp_path):
+    p = tmp_path / "slide.tif"
+    _write_topbottom_tif(p, n_ch=3, h=40, w=60)
+    out_root = tmp_path / "dmc_input"
+    viewer = make_napari_viewer()
+    w = SectionWidget(viewer)
+    w.form.input_path.value = str(p)
+    w.form.animal_id.value = "m1"
+    w.form.output_root.value = str(out_root)
+    w.form.channel_labels.value = "green,cy3,dapi"
+    w.form.order_by.value = "draw"
+    w.form.overview_scale.value = 0.1
+    w.form.flip_vertical.value = False
+    w._load_overview()
+    viewer.layers["slices"].data = [_rect(0, 0, 2, 6)]
+    w._export()
+    crop = tifffile.imread(str(out_root / "m1" / "stitched" / "cy3" / "m1_s001.tif"))
+    assert np.all(crop == 2000)          # cy3 top-half value
