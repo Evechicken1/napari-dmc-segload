@@ -102,21 +102,29 @@ Add these new tests to the end of `tests/test_np2_scene.py`:
 
 ```python
 def test_electrode_points_flat_cut_is_common_across_staggered_shanks():
-    # shank 0 (insert 4000) enters at dv~=0; shank 1 (insert 3000) at dv~=100.
-    frames = {0: make_electrode_frame(0, insert=4000.0),
-              1: make_electrode_frame(1, insert=3000.0)}
-    dv_ref = highest_entry_dv(frames, "dv_coords")          # ~= 0.0
-    max_depth, voxel_um = 1000.0, 10.0
-    dv_cut = dv_ref + max_depth / voxel_um                   # ~= 100.0 voxels
+    import numpy as np
+    from conftest import NP2_TIP0, NP2_SHANK_PITCH_VOX
+    # Parallel shanks translated in DV: shank i's tip (and hence its whole
+    # electrode DV range) sits 100 voxels deeper than shank i-1, so their
+    # entry points are staggered — the case where a flat DV cut actually
+    # differs from a per-shank one. (Varying `insert` alone does NOT stagger
+    # the physical dv_coords, only the depth_um labels, so it cannot be used.)
+    def tip(i):
+        return NP2_TIP0 + np.array([0.0, 100.0 * i, NP2_SHANK_PITCH_VOX * i])
+    frames = {0: make_electrode_frame(0, tip=tip(0)),
+              1: make_electrode_frame(1, tip=tip(1))}
+    dv_ref = highest_entry_dv(frames, "dv_coords")          # shank 0, ~= 0.0
+    max_depth, voxel_um = 3500.0, 10.0
+    dv_cut = dv_ref + max_depth / voxel_um                   # ~= 350 voxels
     pts, feats = electrode_points(frames, COLS, max_depth=max_depth,
                                   dv_col="dv_coords", dv_ref=dv_ref, voxel_um=voxel_um)
     dv_index = COLS.index("dv_coords")
     # every kept electrode (any shank) is at or above the SAME absolute dv level
     assert np.all(pts[:, dv_index] <= dv_cut + 1e-6)
     # the deeper-entering shank keeps fewer electrodes than the reference shank
-    kept0 = (frames[0]["dv_coords"] <= dv_cut).sum()
-    kept1 = (frames[1]["dv_coords"] <= dv_cut).sum()
-    assert kept1 < kept0
+    kept0 = int((frames[0]["dv_coords"] <= dv_cut).sum())
+    kept1 = int((frames[1]["dv_coords"] <= dv_cut).sum())
+    assert 0 < kept1 < kept0
     assert len(pts) == kept0 + kept1 == len(feats)
 
 
